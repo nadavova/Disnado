@@ -34,6 +34,9 @@ import com.amazonaws.services.sqs.model.SendMessageRequest;
 import com.amazonaws.util.Base64;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 
 
 public class Manager {
@@ -42,30 +45,59 @@ public class Manager {
 	private static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
+	private static String mySendQueueUrl, myReceiveQueueUrl;
+	private static String myReceiveQueueUrlName = "local_receive_manager_queue";
+	private static String mySendQueueUrlName = "local_send_manager_queue";
 
 	public static void main(String[] args) throws IOException {
 		BuildTools();
-		getFile(s3);
-
+		S3Object object = getFile(s3);
+		startWorkers(object);
+		
 	}
 
-	private static void getFile(AmazonS3 s3) {
+	private static void startWorkers(S3Object object) {
+		System.out.println("\n object  : " +object);
+		//InputStream objectData = object.getObjectContent();
+	    BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
+	    String line;
+	    while((line = reader.readLine()) != null) {
+	      // can copy the content locally as well
+	      // using a buffered writer
+	      System.out.println(line);
+	    }
+	
+	catch (Exception e) {
+		continue;
+	}
+		
+	}
+
+	private static S3Object getFile(AmazonS3 s3) {
+		System.out.println("getfile \n");
+		myReceiveQueueUrl = getQueue(mySendQueueUrlName);
+		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
+		//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+			System.out.println("message : " + message);
 			if(message == null)
 				continue;
 			else {
+				
 				S3Object object;
 				try {
-					object = s3.getObject(new GetObjectRequest(bucketName, message.getBody()));
+					System.out.println(" before getobject ");
+					System.out.println(message.getBody().substring(message.getBody().lastIndexOf('/') + 1));
+					object = s3.getObject(new GetObjectRequest(bucketName, "input.txt"));
+					return object;
+
 				}
 				catch (Exception e) {
 					continue;
 				}
 			}
 		}
-		
-	
-		
+		return null;
 	}
 
 	private static void BuildTools() {
@@ -84,5 +116,12 @@ public class Manager {
 				.withRegion("us-east-1")
 				.build();
 
+	}
+	private static String getQueue(String queueName) {
+		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
+			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))
+				return queueUrl;
+		}
+		return null;
 	}
 }

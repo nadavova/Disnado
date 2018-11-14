@@ -45,12 +45,14 @@ import com.amazonaws.util.Base64;
 
 public class LocalApplication {
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
-	private static AmazonEC2 ec2;
+	protected static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
 	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
 	private static String mySendQueueUrlName = "local_send_manager_queue";
 	private static String myReceiveQueueUrlName = "local_receive_manager_queue";
+	private static String newTask = "new task";
+	private static String doneTask = "done task";
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static Map<String,String> input_output_files;
 
@@ -77,7 +79,9 @@ public class LocalApplication {
 		System.out.println("before creating manager instance.\n");
 		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
 		mySendQueueUrl = getQueue(mySendQueueUrlName);
+		System.out.println("mySendqueue : " + mySendQueueUrl);
 		myReceiveQueueUrl = getQueue(myReceiveQueueUrlName);
+		System.out.println("myreceivequeue : " + myReceiveQueueUrl);
 		System.out.println("Before createS3.\n");
 		createS3();
 		uploadFiles(s3 , args);
@@ -87,7 +91,8 @@ public class LocalApplication {
 		/* The application will send a message to a specified
 		 *  SQS queue, stating the location of the images list on S3
 	    */
-		sqs.sendMessage(new SendMessageRequest(mySendQueueUrl, "New file uploaded##" + bucketName + "##" + args[0] + "##" + args[args.length - 2 + 1]));
+		sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, "New file uploaded##" + bucketName + "##" + args[0] + "##" + args[args.length - 2 + 1]));
+		//sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, ));
 		//input_output_files.put(args[0], args[(args.length - 1)/2 ]);
 
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
@@ -125,7 +130,6 @@ public class LocalApplication {
 				s3.deleteObject(bucketName, message.getBody());
 			}
 		}
-
 
 		if(terminate) {
 			sqs.sendMessage(new SendMessageRequest(mySendQueueUrl,"$$terminate"));
