@@ -190,7 +190,7 @@ public class LocalApplication {
 			//creates manager instance
 			RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
 			request.setKeyName("test");
-			request.setInstanceType(InstanceType.T1Micro.toString());
+			request.setInstanceType(InstanceType.T1Micro.toString());//request.setInstanceType(InstanceType.T2Micro.toString()); change to t2micro for better performence
 			ArrayList<String> commands = new ArrayList<String>();
 			commands.add("#!/bin/bash");
 			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());

@@ -36,8 +36,10 @@ import com.amazonaws.util.Base64;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.io.BufferedReader;
-
+import java.util.List;
 
 public class Manager {
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
@@ -52,24 +54,22 @@ public class Manager {
 	public static void main(String[] args) throws IOException {
 		BuildTools();
 		S3Object object = getFile(s3);
-		startWorkers(object);
+		//startWorkers(object);
+		createWorkesrInstance(2);
 		
 	}
 
-	private static void startWorkers(S3Object object) {
+	private static void startWorkers(S3Object object) throws IOException {
 		System.out.println("\n object  : " +object);
 		//InputStream objectData = object.getObjectContent();
 	    BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
 	    String line;
 	    while((line = reader.readLine()) != null) {
-	      // can copy the content locally as well
-	      // using a buffered writer
+	    	
+
 	      System.out.println(line);
 	    }
-	
-	catch (Exception e) {
-		continue;
-	}
+	    
 		
 	}
 
@@ -123,5 +123,39 @@ public class Manager {
 				return queueUrl;
 		}
 		return null;
+	}
+	private static List<Instance> createWorkesrInstance(int workerCounter) {
+		Instance instance = null;   
+		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
+		request.setInstanceType(InstanceType.T1Micro.toString());
+		request.setMinCount(workerCounter);
+		request.setMaxCount(workerCounter);
+		/*ArrayList<String> commands = new ArrayList<String>();
+
+		StringBuilder builder = new StringBuilder();
+
+		Iterator<String> commandsIterator = commands.iterator();
+
+		while (commandsIterator.hasNext()) {
+			builder.append(commandsIterator.next());
+			if (!commandsIterator.hasNext()) {
+				break;
+			}
+			builder.append("\n");
+		}
+
+		String userData = new String(Base64.encode(builder.toString().getBytes()));
+		request.setUserData(userData);
+		*/
+		instance = ec2.runInstances(request).getReservation().getInstances().get(0);
+		CreateTagsRequest request7 = new CreateTagsRequest();
+		request7 = request7.withResources(instance.getInstanceId())
+				.withTags(new Tag("Worker", ""));
+		ec2.createTags(request7);
+		System.out.println("Launch instance: " + instance);
+		// start instance
+		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
+		return instances;
+		
 	}
 }
