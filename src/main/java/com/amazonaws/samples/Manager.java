@@ -29,6 +29,7 @@ import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
+import com.amazonaws.samples.MessageInfo;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
 import com.amazonaws.util.Base64;
@@ -59,32 +60,45 @@ public class Manager {
 	private static String myLocalSendQueueUrl, myReceiveQueueUrl;
 	private static String myJobWorkerQueueUrl;
 	private static String myDoneWorkerQueueUrl;
+	private static int NumberOfMessagesPerWorker = 0;
 	private static List<Instance> workersList = new ArrayList<Instance>();
-	private static int NumberOfWorkers = 0;
+	private static int NumberOfactiveWorkers = 0;
 	public static void main(String[] args) throws IOException {
 		BuildTools();
 		
-		Thread LocalManagerMessageReceiveThread = new Thread(() -> messageListener());
+		Thread LocalManagerMessageReceiveThread = new Thread(() -> {
+			try {
+				messageListener();
+			} catch (IOException e) {
+				System.out.println("Couldnt run thread");
+				e.printStackTrace();
+			}
+		});
 		LocalManagerMessageReceiveThread.start();
 		//startWorkers(object);
-		createWorkesrInstance();
+		
 
 	}
 
 	private static void messageListener() throws IOException{
 		S3Object object = getFile(s3);
 		int numOfUrls = getNumOfUrls(object);
+		System.out.println("number of urls : " + numOfUrls);
 		startWorkers(numOfUrls);
-		
-		
 		
 	}
 
 	private static void startWorkers(int numOfUrls) {
-		int workersNeeded = numOfUrls / NumberOfWorkers;
-		createWorkesrInstance(bucketname,workersNeeded);
+		System.out.println("startWorkers method");
+		int workersNeeded = numOfUrls / NumberOfMessagesPerWorker;// we get NumberOfMessagesPerWorker(n) from the message queue
+	      if(NumberOfactiveWorkers < workersNeeded) {
+	        	for(int i = 0; i < workersNeeded - NumberOfactiveWorkers; i++)
+	        		createWorkesrInstance(bucketName);//creates the missing workers
+	        	NumberOfactiveWorkers = workersNeeded;
+	        }
+      }
 		
-	}
+
 
 	private static int getNumOfUrls(S3Object object) throws IOException {
 		System.out.println("\n object  : " +object);
@@ -102,11 +116,15 @@ public class Manager {
 
 	private static S3Object getFile(AmazonS3 s3) {
 		System.out.println("getfile \n");
+		String[] parseMessage = null;
+		
 		//gets the file from local queue
 		myReceiveQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
 		//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
+		
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+			
 			System.out.println("message : " + message);
 			if(message == null)
 				continue;
@@ -152,8 +170,8 @@ public class Manager {
 		}
 		return null;
 	}
-	private static void createWorkesrInstance(String bucketname, int numOfWorkersToInitialize) {
-		for(int i = 0 ; i<numOfWorkersToInitialize; i++) {
+	private static List<Instance> createWorkesrInstance(String bucketname) {
+		
 		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
 		request.setInstanceType(InstanceType.T2Medium.toString());
 
@@ -189,8 +207,7 @@ public class Manager {
 			workersList.add(instance);
 		}
 		System.out.println("Launch instance: " + instances);
-		NumberOfWorkers++;
 	
-		}
+		return instances;
 	}
 }
