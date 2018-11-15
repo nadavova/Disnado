@@ -47,35 +47,63 @@ public class Manager {
 	private static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
+	/*
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static String myReceiveQueueUrlName = "local_receive_manager_queue";
 	private static String mySendQueueUrlName = "local_send_manager_queue";
-
+	 */
+	private static String sqsManagerWorkerNewTask = "sqsManagerWorkerNewTask";
+	private static String sqsWorkerManagerDoneTask = "sqsWorkerManagerDoneTask";
+	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
+	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
+	private static String myLocalSendQueueUrl, myReceiveQueueUrl;
+	private static String myJobWorkerQueueUrl;
+	private static String myDoneWorkerQueueUrl;
+	private static List<Instance> workersList = new ArrayList<Instance>();
+	private static int NumberOfWorkers = 0;
 	public static void main(String[] args) throws IOException {
 		BuildTools();
-		S3Object object = getFile(s3);
+		
+		Thread LocalManagerMessageReceiveThread = new Thread(() -> messageListener());
+		LocalManagerMessageReceiveThread.start();
 		//startWorkers(object);
-		createWorkesrInstance(2);
+		createWorkesrInstance();
+
+	}
+
+	private static void messageListener() throws IOException{
+		S3Object object = getFile(s3);
+		int numOfUrls = getNumOfUrls(object);
+		startWorkers(numOfUrls);
+		
+		
 		
 	}
 
-	private static void startWorkers(S3Object object) throws IOException {
-		System.out.println("\n object  : " +object);
-		//InputStream objectData = object.getObjectContent();
-	    BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
-	    String line;
-	    while((line = reader.readLine()) != null) {
-	    	
-
-	      System.out.println(line);
-	    }
-	    
+	private static void startWorkers(int numOfUrls) {
+		int workersNeeded = numOfUrls / NumberOfWorkers;
+		createWorkesrInstance(bucketname,workersNeeded);
 		
+	}
+
+	private static int getNumOfUrls(S3Object object) throws IOException {
+		System.out.println("\n object  : " +object);
+		int counter = 0;
+		//InputStream objectData = object.getObjectContent();
+		BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
+		String line;
+		while((line = reader.readLine()) != null) {
+			counter++;
+
+			//System.out.println(line);
+		}
+		return counter;
 	}
 
 	private static S3Object getFile(AmazonS3 s3) {
 		System.out.println("getfile \n");
-		myReceiveQueueUrl = getQueue(mySendQueueUrlName);
+		//gets the file from local queue
+		myReceiveQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
 		//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
@@ -83,7 +111,7 @@ public class Manager {
 			if(message == null)
 				continue;
 			else {
-				
+
 				S3Object object;
 				try {
 					System.out.println(" before getobject ");
@@ -124,13 +152,19 @@ public class Manager {
 		}
 		return null;
 	}
-	private static List<Instance> createWorkesrInstance(int workerCounter) {
-		Instance instance = null;   
+	private static void createWorkesrInstance(String bucketname, int numOfWorkersToInitialize) {
+		for(int i = 0 ; i<numOfWorkersToInitialize; i++) {
 		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
-		request.setInstanceType(InstanceType.T1Micro.toString());
-		request.setMinCount(workerCounter);
-		request.setMaxCount(workerCounter);
-		/*ArrayList<String> commands = new ArrayList<String>();
+		request.setInstanceType(InstanceType.T2Medium.toString());
+
+		ArrayList<String> commands = new ArrayList<String>();
+		commands.add("#!/bin/bash");
+		commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
+		commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
+		commands.add("aws s3 cp s3://" + bucketname + "/worker.jar home/ec2-user/worker.jar");
+		commands.add("yes | sudo yum install java-1.8.0");
+		commands.add("yes | sudo yum remove java-1.7.0-openjdk");
+		commands.add("sudo java -jar home/ec2-user/worker.jar"); 
 
 		StringBuilder builder = new StringBuilder();
 
@@ -146,16 +180,17 @@ public class Manager {
 
 		String userData = new String(Base64.encode(builder.toString().getBytes()));
 		request.setUserData(userData);
-		*/
-		instance = ec2.runInstances(request).getReservation().getInstances().get(0);
-		CreateTagsRequest request7 = new CreateTagsRequest();
-		request7 = request7.withResources(instance.getInstanceId())
-				.withTags(new Tag("Worker", ""));
-		ec2.createTags(request7);
-		System.out.println("Launch instance: " + instance);
-		// start instance
 		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
-		return instances;
-		
+		for(Instance instance : instances) {
+			CreateTagsRequest requestTag = new CreateTagsRequest();
+			requestTag = requestTag.withResources(instance.getInstanceId())
+					.withTags(new Tag("Worker", ""));
+			ec2.createTags(requestTag);
+			workersList.add(instance);
+		}
+		System.out.println("Launch instance: " + instances);
+		NumberOfWorkers++;
+	
+		}
 	}
 }
