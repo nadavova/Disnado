@@ -28,6 +28,7 @@ import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
+import com.amazonaws.services.sqs.model.GetQueueAttributesRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.samples.MessageInfo;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
@@ -38,9 +39,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.io.BufferedReader;
 import java.util.List;
+import java.util.Map;
 
 public class Manager {
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
@@ -63,27 +66,63 @@ public class Manager {
 	private static int NumberOfMessagesPerWorker = 0;
 	private static List<Instance> workersList = new ArrayList<Instance>();
 	private static int NumberOfactiveWorkers = 0;
+	private static int NumOfUrlsToProcess = 0;
+
 	public static void main(String[] args) throws IOException {
 		BuildTools();
 		
+		//Thread 1
 		Thread LocalManagerMessageReceiveThread = new Thread(() -> {
 			try {
-				messageListener();
+				localMessageListener();
 			} catch (IOException e) {
-				System.out.println("Couldnt run thread");
+				System.out.println("Couldnt run Thread 1");
 				e.printStackTrace();
 			}
 		});
 		LocalManagerMessageReceiveThread.start();
-		//startWorkers(object);
 		
-
+		//Thread 2
+		Thread ManagerWorkerMessageReceiveThread = new Thread(() -> {
+			workerMessageListener();
+		});
+		ManagerWorkerMessageReceiveThread.start();
 	}
 
-	private static void messageListener() throws IOException{
+	private static void workerMessageListener() {
+		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
+		String[] processedUrl = new String[NumOfUrlsToProcess];
+		int numOfDoneUrls = 0;
+		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
+		
+		/*
+		GetQueueAttributesRequest qar = new GetQueueAttributesRequest( myDoneWorkerQueueUrl );
+		qar.setAttributeNames( Arrays.asList( "wtf"));
+        Map map = sqs.getQueueAttributes( qar ).getAttributes();
+        System.out.println(map);
+        */
+        
+		while(numOfDoneUrls < NumOfUrlsToProcess) {
+			//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
+			for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+				System.out.println("message (WorkerMessageListener) : " + message);
+				//gets the done url
+				processedUrl[numOfDoneUrls]= message.getBody().split("@@@")[1];
+				String messageRecieptHandle = message.getReceiptHandle();
+				sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, messageRecieptHandle));
+				numOfDoneUrls++;
+			}
+		}
+	}
+
+	private static void localMessageListener() throws IOException{
 		S3Object object = getFile(s3);
-		int numOfUrls = getNumOfUrls(object);
+		//creates Manager->Worker queue in order to send new tasks to worker
+		myJobWorkerQueueUrl = createAndGetQueue(sqsManagerWorkerNewTask);
+		int numOfUrls = sendUrlsToMessageQueue(object);
+		NumOfUrlsToProcess = numOfUrls; 
 		System.out.println("number of urls : " + numOfUrls);
+
 		startWorkers(numOfUrls);
 		
 	}
@@ -99,16 +138,19 @@ public class Manager {
       }
 		
 
-
-	private static int getNumOfUrls(S3Object object) throws IOException {
+	//sends new tasks(urls) to message queue and returns number of urls to be done.
+	private static int sendUrlsToMessageQueue(S3Object object) throws IOException {
 		System.out.println("\n object  : " +object);
 		int counter = 0;
 		//InputStream objectData = object.getObjectContent();
 		BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
 		String line;
-		while((line = reader.readLine()) != null) {
-			counter++;
 
+		while((line = reader.readLine()) != null) {
+			// send new worker job to sqsManagerWorkerNewTask queue
+			sqs.sendMessage(new SendMessageRequest(sqsManagerWorkerNewTask, "new image task@@@" + bucketName + "@@@" + line));
+			counter++;
+			
 			//System.out.println(line);
 		}
 		return counter;
@@ -117,19 +159,19 @@ public class Manager {
 	private static S3Object getFile(AmazonS3 s3) {
 		System.out.println("getfile \n");
 		String[] parseMessage = null;
-		
 		//gets the file from local queue
-		myReceiveQueueUrl = getQueue(sqsLocalManagerFileUpload);
+		myReceiveQueueUrl = createAndGetQueue(sqsLocalManagerFileUpload);
+		
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
 		//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
-		
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
-			
 			System.out.println("message : " + message);
+			
 			if(message == null)
 				continue;
 			else {
-
+				parseMessage = message.getBody().split("@@@");
+				NumberOfMessagesPerWorker = Integer.parseInt(parseMessage[3]);
 				S3Object object;
 				try {
 					System.out.println(" before getobject ");
@@ -163,13 +205,29 @@ public class Manager {
 				.build();
 
 	}
-	private static String getQueue(String queueName) {
+	private static String createAndGetQueue(String queueName) {
 		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
 			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))
 				return queueUrl;
 		}
+
+		try {
+			CreateQueueRequest createQueueRequest = new CreateQueueRequest(queueName);
+			return sqs.createQueue(createQueueRequest).getQueueUrl();
+		}
+
+		catch (AmazonServiceException ase) {
+			System.out.println("Caught an AmazonServiceException, which means your request made it " +
+					"to Amazon SQS, but was rejected with an error response for some reason.");
+		} 
+
+		catch (AmazonClientException ace) {
+			System.out.println("Error Message: " + ace.getMessage());
+		}
+
 		return null;
 	}
+
 	private static List<Instance> createWorkesrInstance(String bucketname) {
 		
 		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
@@ -195,7 +253,7 @@ public class Manager {
 			}
 			builder.append("\n");
 		}
-
+		
 		String userData = new String(Base64.encode(builder.toString().getBytes()));
 		request.setUserData(userData);
 		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();

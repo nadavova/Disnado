@@ -49,13 +49,14 @@ public class LocalApplication {
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
 	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
-	private static String mySendQueueUrlName = "local_send_manager_queue";
-	private static String myReceiveQueueUrlName = "local_receive_manager_queue";
+	//private static String mySendQueueUrlName = "local_send_manager_queue";
+	//private static String myReceiveQueueUrlName = "local_receive_manager_queue";
 	private static String newTask = "new task";
 	private static String doneTask = "done task";
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static Map<String,String> input_output_files;
-
+	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
+	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
 
 	public static void main(String[] args) {
 		long startTime = System.currentTimeMillis();
@@ -78,9 +79,9 @@ public class LocalApplication {
 
 		System.out.println("before creating manager instance.\n");
 		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
-		mySendQueueUrl = getQueue(mySendQueueUrlName);
+		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		System.out.println("mySendqueue : " + mySendQueueUrl);
-		myReceiveQueueUrl = getQueue(myReceiveQueueUrlName);
+		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
 		System.out.println("myreceivequeue : " + myReceiveQueueUrl);
 		System.out.println("Before createS3.\n");
 		createS3();
@@ -91,7 +92,7 @@ public class LocalApplication {
 		/* The application will send a message to a specified
 		 *  SQS queue, stating the location of the images list on S3
 	    */
-		sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, "New file uploaded##" + bucketName + "##" + args[0] + "##" + args[args.length - 2 + 1]));
+		sqs.sendMessage(new SendMessageRequest(sqsLocalManagerFileUpload, "new task@@@" + bucketName + "@@@" + args[0] + "@@@" + args[args.length - 1]));
 		//sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, ));
 		//input_output_files.put(args[0], args[(args.length - 1)/2 ]);
 
@@ -190,7 +191,7 @@ public class LocalApplication {
 			//creates manager instance
 			RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
 			request.setKeyName("test");
-			request.setInstanceType(InstanceType.T1Micro.toString());//request.setInstanceType(InstanceType.T2Micro.toString()); change to t2micro for better performence
+			request.setInstanceType(InstanceType.T2Micro.toString());//request.setInstanceType(InstanceType.T2Micro.toString()); change to t2micro for better performence
 			ArrayList<String> commands = new ArrayList<String>();
 			commands.add("#!/bin/bash");
 			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
