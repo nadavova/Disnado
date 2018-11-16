@@ -87,6 +87,8 @@ public class Manager {
 			workerMessageListener();
 		});
 		ManagerWorkerMessageReceiveThread.start();
+		
+
 	}
 
 	private static void workerMessageListener() {
