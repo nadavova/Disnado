@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.codec.binary.Base64;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
@@ -20,6 +21,7 @@ import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
 import com.amazonaws.services.ec2.model.CreateTagsRequest;
 import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
 import com.amazonaws.services.ec2.model.DescribeInstancesResult;
+import com.amazonaws.services.ec2.model.IamInstanceProfileSpecification;
 import com.amazonaws.services.ec2.model.Instance;
 import com.amazonaws.services.ec2.model.InstanceType;
 import com.amazonaws.services.ec2.model.Reservation;
@@ -40,7 +42,7 @@ import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
-import com.amazonaws.util.Base64;
+//import com.amazonaws.util.Base64;
 
 
 public class LocalApplication {
@@ -57,6 +59,7 @@ public class LocalApplication {
 	private static Map<String,String> input_output_files;
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
+	public static IamInstanceProfileSpecification instanceP;
 
 	public static void main(String[] args) {
 		long startTime = System.currentTimeMillis();
@@ -76,22 +79,25 @@ public class LocalApplication {
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
-
-		System.out.println("before creating manager instance.\n");
-		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
+		
+		instanceP = new IamInstanceProfileSpecification();
+		instanceP.setArn("arn:aws:iam::692054548727:instance-profile/EgorNadavRole");
 		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		System.out.println("mySendqueue : " + mySendQueueUrl);
 		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
+		System.out.println("before creating manager instance.\n");
+		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
+
 		System.out.println("myreceivequeue : " + myReceiveQueueUrl);
 		System.out.println("Before createS3.\n");
 		createS3();
-		uploadFiles(s3 , args);
+		//uploadFiles(s3 , args);
 		System.out.println("Sending a message to Local-Manager Queue.\n");
 
-		        
+
 		/* The application will send a message to a specified
 		 *  SQS queue, stating the location of the images list on S3
-	    */
+		 */
 		sqs.sendMessage(new SendMessageRequest(sqsLocalManagerFileUpload, "new task@@@" + bucketName + "@@@" + args[0] + "@@@" + args[args.length - 1]));
 		//sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, ));
 		//input_output_files.put(args[0], args[(args.length - 1)/2 ]);
@@ -188,18 +194,64 @@ public class LocalApplication {
 		Instance instance = null;        
 
 		try {
-			//creates manager instance
-			RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
+			//creates manager instance  
+			RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
+			//RunInstancesRequest request = new RunInstancesRequest("ami-1853ac65", 1, 1);
+
 			request.setKeyName("test");
+			request.withKeyName("test");
+			request.setIamInstanceProfile(instanceP);
+			//request.withSecurityGroups("Nadav");
 			request.setInstanceType(InstanceType.T2Micro.toString());//request.setInstanceType(InstanceType.T2Micro.toString()); change to t2micro for better performence
 			ArrayList<String> commands = new ArrayList<String>();
-			commands.add("#!/bin/bash");
+			commands.add("#!/bin/bash\n"); //start the bash
+			commands.add("sudo su\n");
+			commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+			commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+			commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+			commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+
+			commands.add("yum -y install java-1.8.0 \n");
+			commands.add("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
 			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
 			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-			commands.add("aws s3 cp s3://" + bucketName + "/manager.jar home/ec2-user/manager.jar");
+			commands.add("# Bootstrap: download jar from S3 and run it");
+			commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Manager.jar" +" -O ./" + "Manager.jar" );
+			//
+			//commands.add("aws s3 cp https://s3.amazonaws.com/akiajbjbasaiw6nhkk7a/Manager.jar home/ec2-user/Manager.jar");
+			//commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
+			commands.add("java -jar Manager.jar");
+			/*
+			commands.add("#!/bin/bash");
+			commands.add("sudo apt-get update");
+			commands.add("sudo apt-get install openjdk-8-jre-headless -y");
+			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
+			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
+			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
+			commands.add("java -jar Manager.jar");
+*/
+
+/*original
+ * 
+ * 			commands.add("#!/bin/bash");
+			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
+			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
+			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
 			commands.add("yes | sudo yum install java-1.8.0");
 			commands.add("yes | sudo yum remove java-1.7.0-openjdk");
-			commands.add("sudo java -jar home/ec2-user/manager.jar " + workerCounter);
+			commands.add("sudo java -jar home/ec2-user/Manager.jar " + workerCounter);
+		*/
+			
+			/* from github
+			 * 		lines.add("#! /bin/bash");
+		lines.add("sudo apt-get update");
+		lines.add("sudo apt-get install openjdk-8-jre-headless -y");
+		lines.add("sudo apt-get install wget -y");
+		lines.add("sudo apt-get install unzip -y");
+		lines.add("sudo wget https://s3.amazonaws.com/ass1jars203822300/manager.zip");
+		lines.add("sudo unzip -P 123456 manager.zip");
+		lines.add("java -jar manager.jar");
+		*/
 
 			StringBuilder builder = new StringBuilder();
 
@@ -212,16 +264,18 @@ public class LocalApplication {
 				}
 				builder.append("\n");
 			}
-
-			String userData = new String(Base64.encode(builder.toString().getBytes()));
+			//String(Base64.encodeBase64(managerBuild.toString().getBytes()));
+			String userData = new String(Base64.encodeBase64(builder.toString().getBytes()));
 			request.setUserData(userData);
+			//request.setUserData(createManagerScript());
+
 			System.out.println("before running instance");
 			instance = ec2.runInstances(request).getReservation().getInstances().get(0);
 			System.out.println("after running instance");
-			CreateTagsRequest request7 = new CreateTagsRequest();
+			/*CreateTagsRequest request7 = new CreateTagsRequest();
 			request7 = request7.withResources(instance.getInstanceId())
 					.withTags(new Tag("Manager", ""));
-			ec2.createTags(request7);
+			ec2.createTags(request7);*/
 			System.out.println("Launch instance: " + instance);
 
 		} catch (AmazonServiceException ase) {
@@ -275,20 +329,47 @@ public class LocalApplication {
 
 		return null;
 	}
+	private static String createManagerScript() {
+        StringBuilder managerBuild = new StringBuilder();
+        managerBuild.append("#!/bin/bash\n"); 
+        managerBuild.append("sudo su\n");
+        managerBuild.append("yum -y install java-1.8.0 \n");
+        managerBuild.append("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
+        managerBuild.append("aws s3 cp s3://"+bucketName+"/Manager.jar  Manager.jar\n");
+        managerBuild.append("java -jar Manager.jar\n");
 
-	//TOFIX : One file is enough
+        return new String(Base64.encodeBase64(managerBuild.toString().getBytes()));
+
+    }
+	/*private  static String build2() {
+		String[] lines =new String[] {
+				"#!/bin/bash",
+				"sudo yum -y install java-1.8.0-openjdk.x86_64",
+				"",
+				"wget https://" + bucketName + ".s3amazonaws.com/" + "Manager.jar" + " -O ./" + "Manager.jar",
+				"java -jar ./Manager.jar",
+				"",
+		};
+		return new String(Base64.encode(String.join( "/n", lines).getBytes()));
+	}*/
+				
+
+
+	//uploads 3 files, args[0] = input file , args[1] = Manager.jar file, args[2] = Worker.jar file
 	private static void uploadFiles(AmazonS3 s3, String[] args) {     
-		System.out.println("Uploading jar files\n");
-		String key = null;
-		File file = null;
+		for( int i = 0; i < 2 ; i++) {
+			System.out.println("Uploading jar files\n");
+			String key = null;
+			File file = null;
 
-		file = new File(args[0]);
-		key = file.getName();
-		System.out.println("key: " + key + "\n");
-		System.out.println("file: " + file + "\n");
-		PutObjectRequest req = new PutObjectRequest(bucketName, key, file);
-		//The application will send a message to a specified SQS queue, stating the location of the images list on S3
-		s3.putObject(req);
-		System.out.println("after object request");
+			file = new File(args[i]);
+            key = file.getName().replace('\\', '_').replace('/','_').replace(':', '_');
+			System.out.println("key: " + key + "\n");
+			System.out.println("file: " + file + "\n");
+			PutObjectRequest req = new PutObjectRequest(bucketName, key, file);
+			//The application will send a message to a specified SQS queue, stating the location of the images list on S3
+			s3.putObject(req);
+			System.out.println("after object request");
+		}
 	}
 }

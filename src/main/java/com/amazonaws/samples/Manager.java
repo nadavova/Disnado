@@ -9,41 +9,34 @@ import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
 import com.amazonaws.services.ec2.model.CreateTagsRequest;
-import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
-import com.amazonaws.services.ec2.model.DescribeInstancesResult;
+
 import com.amazonaws.services.ec2.model.Instance;
 import com.amazonaws.services.ec2.model.InstanceType;
-import com.amazonaws.services.ec2.model.Reservation;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.Tag;
-import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.Bucket;
 import com.amazonaws.services.s3.model.GetObjectRequest;
-import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
-import com.amazonaws.services.sqs.model.GetQueueAttributesRequest;
 import com.amazonaws.services.sqs.model.Message;
-import com.amazonaws.samples.MessageInfo;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
 import com.amazonaws.util.Base64;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.io.BufferedReader;
 import java.util.List;
-import java.util.Map;
+import java.io.InputStreamReader;
+
+
 
 public class Manager {
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
@@ -51,11 +44,13 @@ public class Manager {
 	private static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
+	
 	/*
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static String myReceiveQueueUrlName = "local_receive_manager_queue";
 	private static String mySendQueueUrlName = "local_send_manager_queue";
 	 */
+	
 	private static String sqsManagerWorkerNewTask = "sqsManagerWorkerNewTask";
 	private static String sqsWorkerManagerDoneTask = "sqsWorkerManagerDoneTask";
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
@@ -70,7 +65,7 @@ public class Manager {
 
 	public static void main(String[] args) throws IOException {
 		BuildTools();
-		
+
 		//Thread 1
 		Thread LocalManagerMessageReceiveThread = new Thread(() -> {
 			try {
@@ -81,14 +76,12 @@ public class Manager {
 			}
 		});
 		LocalManagerMessageReceiveThread.start();
-		
+
 		//Thread 2
 		Thread ManagerWorkerMessageReceiveThread = new Thread(() -> {
 			workerMessageListener();
 		});
 		ManagerWorkerMessageReceiveThread.start();
-		
-
 	}
 
 	private static void workerMessageListener() {
@@ -96,14 +89,14 @@ public class Manager {
 		String[] processedUrl = new String[NumOfUrlsToProcess];
 		int numOfDoneUrls = 0;
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
-		
+
 		/*
 		GetQueueAttributesRequest qar = new GetQueueAttributesRequest( myDoneWorkerQueueUrl );
 		qar.setAttributeNames( Arrays.asList( "wtf"));
         Map map = sqs.getQueueAttributes( qar ).getAttributes();
         System.out.println(map);
-        */
-        
+		 */
+
 		while(numOfDoneUrls < NumOfUrlsToProcess) {
 			//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
 			for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
@@ -124,21 +117,19 @@ public class Manager {
 		int numOfUrls = sendUrlsToMessageQueue(object);
 		NumOfUrlsToProcess = numOfUrls; 
 		System.out.println("number of urls : " + numOfUrls);
-
 		startWorkers(numOfUrls);
-		
 	}
 
 	private static void startWorkers(int numOfUrls) {
 		System.out.println("startWorkers method");
 		int workersNeeded = numOfUrls / NumberOfMessagesPerWorker;// we get NumberOfMessagesPerWorker(n) from the message queue
-	      if(NumberOfactiveWorkers < workersNeeded) {
-	        	for(int i = 0; i < workersNeeded - NumberOfactiveWorkers; i++)
-	        		createWorkesrInstance(bucketName);//creates the missing workers
-	        	NumberOfactiveWorkers = workersNeeded;
-	        }
-      }
-		
+		if(NumberOfactiveWorkers < workersNeeded) {
+			for(int i = 0; i < workersNeeded - NumberOfactiveWorkers; i++)
+				createWorkesrInstance(bucketName);//creates the missing workers
+			NumberOfactiveWorkers = workersNeeded;
+		}
+	}
+
 
 	//sends new tasks(urls) to message queue and returns number of urls to be done.
 	private static int sendUrlsToMessageQueue(S3Object object) throws IOException {
@@ -152,7 +143,7 @@ public class Manager {
 			// send new worker job to sqsManagerWorkerNewTask queue
 			sqs.sendMessage(new SendMessageRequest(sqsManagerWorkerNewTask, "new image task@@@" + bucketName + "@@@" + line));
 			counter++;
-			
+
 			//System.out.println(line);
 		}
 		return counter;
@@ -163,12 +154,11 @@ public class Manager {
 		String[] parseMessage = null;
 		//gets the file from local queue
 		myReceiveQueueUrl = createAndGetQueue(sqsLocalManagerFileUpload);
-		
+
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
 		//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
 			System.out.println("message : " + message);
-			
 			if(message == null)
 				continue;
 			else {
@@ -178,7 +168,7 @@ public class Manager {
 				try {
 					System.out.println(" before getobject ");
 					System.out.println(message.getBody().substring(message.getBody().lastIndexOf('/') + 1));
-					object = s3.getObject(new GetObjectRequest(bucketName, "input.txt"));
+					object = s3.getObject(new GetObjectRequest(bucketName, "input.txt"));// TOFIX INPUT.TXT
 					return object;
 
 				}
@@ -207,6 +197,7 @@ public class Manager {
 				.build();
 
 	}
+	
 	private static String createAndGetQueue(String queueName) {
 		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
 			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))
@@ -231,18 +222,17 @@ public class Manager {
 	}
 
 	private static List<Instance> createWorkesrInstance(String bucketname) {
-		
 		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
-		request.setInstanceType(InstanceType.T2Medium.toString());
+		request.setInstanceType(InstanceType.T2Micro.toString());
 
 		ArrayList<String> commands = new ArrayList<String>();
 		commands.add("#!/bin/bash");
 		commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
 		commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-		commands.add("aws s3 cp s3://" + bucketname + "/worker.jar home/ec2-user/worker.jar");
+		commands.add("aws s3 cp s3://" + bucketname + "/Worker.jar home/ec2-user/Worker.jar");
 		commands.add("yes | sudo yum install java-1.8.0");
 		commands.add("yes | sudo yum remove java-1.7.0-openjdk");
-		commands.add("sudo java -jar home/ec2-user/worker.jar"); 
+		commands.add("sudo java -jar home/ec2-user/Worker.jar"); 
 
 		StringBuilder builder = new StringBuilder();
 
@@ -255,7 +245,6 @@ public class Manager {
 			}
 			builder.append("\n");
 		}
-		
 		String userData = new String(Base64.encode(builder.toString().getBytes()));
 		request.setUserData(userData);
 		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
@@ -267,7 +256,7 @@ public class Manager {
 			workersList.add(instance);
 		}
 		System.out.println("Launch instance: " + instances);
-	
+
 		return instances;
 	}
 }
