@@ -82,6 +82,8 @@ public class LocalApplication {
 		
 		instanceP = new IamInstanceProfileSpecification();
 		instanceP.setArn("arn:aws:iam::692054548727:instance-profile/EgorNadavRole");
+		createS3();
+		//uploadFiles(s3 , args);
 		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		System.out.println("mySendqueue : " + mySendQueueUrl);
 		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
@@ -90,8 +92,7 @@ public class LocalApplication {
 
 		System.out.println("myreceivequeue : " + myReceiveQueueUrl);
 		System.out.println("Before createS3.\n");
-		createS3();
-		//uploadFiles(s3 , args);
+
 		System.out.println("Sending a message to Local-Manager Queue.\n");
 
 
@@ -356,7 +357,7 @@ public class LocalApplication {
 
 	//uploads 3 files, args[0] = input file , args[1] = Manager.jar file, args[2] = Worker.jar file
 	private static void uploadFiles(AmazonS3 s3, String[] args) {     
-		for( int i = 0; i < 2 ; i++) {
+		for( int i = 0; i < 3 ; i++) {
 			System.out.println("Uploading jar files\n");
 			String key = null;
 			File file = null;

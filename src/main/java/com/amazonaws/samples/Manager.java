@@ -9,7 +9,7 @@ import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
 import com.amazonaws.services.ec2.model.CreateTagsRequest;
-
+import com.amazonaws.services.ec2.model.IamInstanceProfileSpecification;
 import com.amazonaws.services.ec2.model.Instance;
 import com.amazonaws.services.ec2.model.InstanceType;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
@@ -62,6 +62,8 @@ public class Manager {
 	private static List<Instance> workersList = new ArrayList<Instance>();
 	private static int NumberOfactiveWorkers = 0;
 	private static int NumOfUrlsToProcess = 0;
+	public static IamInstanceProfileSpecification instanceP;
+
 
 	public static void main(String[] args) throws IOException {
 		BuildTools();
@@ -195,6 +197,9 @@ public class Manager {
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
+		
+		instanceP = new IamInstanceProfileSpecification();
+		instanceP.setArn("arn:aws:iam::692054548727:instance-profile/EgorNadavRole");
 
 	}
 	
@@ -222,17 +227,22 @@ public class Manager {
 	}
 
 	private static List<Instance> createWorkesrInstance(String bucketname) {
-		RunInstancesRequest request = new RunInstancesRequest("ami-b66ed3de", 1, 1);
+		RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
 		request.setInstanceType(InstanceType.T2Micro.toString());
-
 		ArrayList<String> commands = new ArrayList<String>();
-		commands.add("#!/bin/bash");
+		commands.add("#!/bin/bash\n"); //start the bash
+		commands.add("sudo su\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("yum -y install java-1.8.0 \n");
+		commands.add("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
 		commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
 		commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-		commands.add("aws s3 cp s3://" + bucketname + "/Worker.jar home/ec2-user/Worker.jar");
-		commands.add("yes | sudo yum install java-1.8.0");
-		commands.add("yes | sudo yum remove java-1.7.0-openjdk");
-		commands.add("sudo java -jar home/ec2-user/Worker.jar"); 
+		commands.add("# Bootstrap: download jar from S3 and run it");
+		commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Worker.jar" +" -O ./" + "Worker.jar" );
+		commands.add("java -jar Worker.jar");
 
 		StringBuilder builder = new StringBuilder();
 
@@ -245,16 +255,17 @@ public class Manager {
 			}
 			builder.append("\n");
 		}
+		request.setIamInstanceProfile(instanceP);
 		String userData = new String(Base64.encode(builder.toString().getBytes()));
 		request.setUserData(userData);
 		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
-		for(Instance instance : instances) {
+		/*for(Instance instance : instances) {
 			CreateTagsRequest requestTag = new CreateTagsRequest();
 			requestTag = requestTag.withResources(instance.getInstanceId())
 					.withTags(new Tag("Worker", ""));
 			ec2.createTags(requestTag);
 			workersList.add(instance);
-		}
+		}*/
 		System.out.println("Launch instance: " + instances);
 
 		return instances;
