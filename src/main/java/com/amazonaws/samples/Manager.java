@@ -15,6 +15,7 @@ import com.amazonaws.services.ec2.model.InstanceType;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.Tag;
+import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.GetObjectRequest;
@@ -89,6 +90,7 @@ public class Manager {
 	private static void workerMessageListener() {
 		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
 		String[] processedUrl = new String[NumOfUrlsToProcess];
+		String[] UrlList = new String[NumOfUrlsToProcess];
 		int numOfDoneUrls = 0;
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
 
@@ -100,16 +102,27 @@ public class Manager {
 		 */
 
 		while(numOfDoneUrls < NumOfUrlsToProcess) {
+			System.out.println("num of done urls  : " + numOfDoneUrls);
 			//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
 			for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
 				System.out.println("message (WorkerMessageListener) : " + message);
 				//gets the done url
 				processedUrl[numOfDoneUrls]= message.getBody().split("@@@")[1];
+				UrlList[numOfDoneUrls]= message.getBody().split("@@@")[2];
+				
 				String messageRecieptHandle = message.getReceiptHandle();
 				sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, messageRecieptHandle));
 				numOfDoneUrls++;
 			}
 		}
+		for(int i = 0; i<processedUrl.length;i++) {
+			System.out.println("processedUrl["+i+"]: " +processedUrl[i]);
+		}
+		for(int i = 0; i<UrlList.length;i++) {
+			System.out.println("UrlList["+i+"]: " +UrlList[i]);
+		}
+		closeInstances();
+		
 	}
 
 	private static void localMessageListener() throws IOException{
@@ -259,15 +272,27 @@ public class Manager {
 		String userData = new String(Base64.encode(builder.toString().getBytes()));
 		request.setUserData(userData);
 		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
-		/*for(Instance instance : instances) {
-			CreateTagsRequest requestTag = new CreateTagsRequest();
+		for(Instance instance : instances) {
+			/*CreateTagsRequest requestTag = new CreateTagsRequest();
 			requestTag = requestTag.withResources(instance.getInstanceId())
 					.withTags(new Tag("Worker", ""));
 			ec2.createTags(requestTag);
-			workersList.add(instance);
-		}*/
+			*/
+			//workersList.add(instance);
+			
+		}
+		workersList.addAll(instances);
 		System.out.println("Launch instance: " + instances);
 
 		return instances;
 	}
+    private static void closeInstances() {
+        List<String> toCloseList = new ArrayList<>();
+        if (workersList != null) {
+            for (Instance i : workersList)
+                toCloseList.add(i.getInstanceId());
+            TerminateInstancesRequest terminateRequest = new TerminateInstancesRequest(toCloseList);
+            ec2.terminateInstances(terminateRequest);
+        }
+    }
 }

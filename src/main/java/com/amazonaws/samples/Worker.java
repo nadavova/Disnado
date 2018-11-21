@@ -25,6 +25,7 @@ import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
+import com.amazonaws.services.sqs.model.SendMessageRequest;
 
 
 public class Worker {
@@ -42,17 +43,25 @@ public class Worker {
 
 	
 	public static void main(String[]args) {
-		doOcr();
-		/*BuildTools();
+		System.out.println("@@@@@@@@@@@@@STARTING WORKER@@@@@@@@@@@@@@@@");
+		BuildTools();
+		int i = 0;
 		while(getMessageFromManagerQ()) {
-			//doOcr();
-			//sendProcessedMessageToManagerQ();
+			System.out.println("@@@@@@@@@@@@@WHILE LOOP: " + i + "@@@@@@@@@@@@@@@@");
+			doOcr();
+			System.out.println("@@@@@@@@@@@@@BEFORE SENDPROCESSEDMESSAGE@@@@@@@@@@@@@@@@");
+			sendProcessedMessageToManagerQ();
+			i++;
 		}
-		*/
+
+		
 		
 	}
+	// message : [0]done image task, [1] processed text [2]URL
 	private static void sendProcessedMessageToManagerQ() {
-		// TODO Auto-generated method stub
+		System.out.println("@@@@@@@@@@@@@SEND PROCESSED MESSAGE TO Q @@@@@@@@@@@@@@@@");
+		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
+		sqs.sendMessage(new SendMessageRequest(sqsWorkerManagerDoneTask, "done image task@@@" +outputText +"@@@" + URLToParse));
 		
 	}
 	private static void BuildTools() {
@@ -84,10 +93,12 @@ public class Worker {
 			URLToParse = parseMessage[2];
 			System.out.println(i + ") URLtoParse : " + URLToParse);
 			String messageRecieptHandle = message.getReceiptHandle();
+			System.out.println("@@@@@@@@@@@@@DELETE MESSAGE FROM QUEUE : " + message + "@@@@@@@@@@@@@@@@");
 			sqs.deleteMessage(new DeleteMessageRequest(myJobWorkerQueueUrl, messageRecieptHandle));
-			i++;
+			
 			return true;
 		}
+		System.out.println("@@@@@@@@@@@@@returns false@@@@@@@@@@@@@@@@");
 		return false;
 		
 	}
@@ -98,14 +109,14 @@ public class Worker {
         ocr.startEngine("eng", Ocr.SPEED_FASTEST);
         InputStream in;
         try {
-            URL url = new URL("http://luc.devroye.org/OCR-A-Comparison-2009.jpg");
+            URL url = new URL(URLToParse);
             in=url.openStream();
             Files.copy(in,Paths.get("pic.jpg"),StandardCopyOption.REPLACE_EXISTING);
             in.close();
-            String textOfImage= ocr.recognize(new File[] { new File ("pic.jpg")}, Ocr.RECOGNIZE_TYPE_ALL, Ocr.OUTPUT_FORMAT_PLAINTEXT);
+            outputText= ocr.recognize(new File[] { new File ("pic.jpg")}, Ocr.RECOGNIZE_TYPE_ALL, Ocr.OUTPUT_FORMAT_PLAINTEXT);
             System.out.println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
             System.out.println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
-            System.out.println("Got this text: \n "+ textOfImage);
+            System.out.println("Got this text: \n "+ outputText);
             System.out.println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
             System.out.println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
         } catch (IOException e) {
