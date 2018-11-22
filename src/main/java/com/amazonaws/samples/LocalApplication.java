@@ -1,8 +1,16 @@
 package com.amazonaws.samples;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -43,7 +51,7 @@ import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
 //import com.amazonaws.util.Base64;
-
+import static java.lang.Thread.sleep;
 
 public class LocalApplication {
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
@@ -61,7 +69,7 @@ public class LocalApplication {
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
 	public static IamInstanceProfileSpecification instanceP;
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws IOException, InterruptedException {
 		long startTime = System.currentTimeMillis();
 		boolean terminate = false;
 		System.out.println("bucketName: " + bucketName);
@@ -79,10 +87,10 @@ public class LocalApplication {
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
-		
+
 		instanceP = new IamInstanceProfileSpecification();
 		instanceP.setArn("arn:aws:iam::692054548727:instance-profile/EgorNadavRole");
-		createS3();
+		//createS3();
 		//uploadFiles(s3 , args);
 		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		System.out.println("mySendqueue : " + mySendQueueUrl);
@@ -102,42 +110,81 @@ public class LocalApplication {
 		sqs.sendMessage(new SendMessageRequest(sqsLocalManagerFileUpload, "new task@@@" + bucketName + "@@@" + args[0] + "@@@" + args[args.length - 1]));
 		//sqs.sendMessage(new SendMessageRequest(mySendQueueUrlName, ));
 		//input_output_files.put(args[0], args[(args.length - 1)/2 ]);
-
-		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
+		try {
+			while(!gotResponse()) 
+			{
+				System.out.println("wait loop - trying to get The Manager's Summary file");
+				sleep(10000);
+			}
+		} catch (InterruptedException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
 		/*
 		 * ****checks all messages from SQS****
 		 * The application will check a specified SQS queue
 		 *  for a message indicating the process is done 
 		 *  and the response is available on S3.
 		 */
+		System.out.println("BEFORE RECEIVE MESSAGE TO DOWNLOAD");
+		sleep(10000);
+		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
+		System.out.println("receivemessagereqeust: " + receiveMessageRequest.toString());
+		System.out.println("before waste of time while loop listens to done queue");
+
+		while(sqs.receiveMessage(receiveMessageRequest).getMessages()==null) {}
+		System.out.println("after waste of time while loop listens to done queue");
+
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+			System.out.println("MESSAGE RECEIVED");
 			if(message == null)
 				continue;
-			else if(message.getBody().startsWith("###")) { //debug
-				System.out.println(message.getBody());
-				String messageRecieptHandle = message.getReceiptHandle();
-				sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
-			}
 			else {
+				System.out.println("MESSAGE ABOUT NEW UPLOAD(SUMMARY FILE) RECEIVED");
+
 				/*
 				 * The application will download the response from S3.
 				 */
+				System.out.println("DOWNLOADING RESPONSE OBJECT FROM S3");
+
 				S3Object object;
 				try {
-					object = s3.getObject(new GetObjectRequest(bucketName, message.getBody()));
+					object = s3.getObject(new GetObjectRequest(bucketName, "output.html"));//change hard coded url name
 				}
 				catch (Exception e) {
 					continue;
 				}
-
-				//TODO: add HTML export
+				System.out.println("SUMMARY OBJECT HAS BEEN DOWNLOADED");
 
 				String messageRecieptHandle = message.getReceiptHandle();
 				sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
+				System.out.println("MESSAGE ABOUT DONE SUMMARY FILE DELETED");
 
+				//TODO: add HTML export
+				System.out.println("START TO EXPORT SUMMARY FILE TOC:\\\\workingManagerToDelete\"+ \"OutputSummary.html ");
+
+				String path = "C:\\workingManagerToDelete"+ "OutputSummary.html" ;//need to fix \ is missing
+				InputStream in = object.getObjectContent();
+				byte[] buf = new byte[1024];
+				OutputStream out = new FileOutputStream(path);
+				int count = 0;
+				while( (count = in.read(buf)) != -1)
+				{
+				   if( Thread.interrupted() )
+				   {
+						out.close();
+				       throw new InterruptedException();
+				   }
+				   out.write(buf, 0, count);
+				}
+				out.close();
+				in.close();
+				System.out.println("DOWNLOADING SUMMARY FILE TO LOCAL COMPUTER DONE");
 				s3.deleteObject(bucketName, message.getBody());
 			}
 		}
+
+
 
 		if(terminate) {
 			sqs.sendMessage(new SendMessageRequest(mySendQueueUrl,"$$terminate"));
@@ -164,6 +211,19 @@ public class LocalApplication {
 		System.out.println("DONE");
 
 	}
+	
+	private static boolean gotResponse() throws InterruptedException {
+		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
+		//waitSomeTime();
+
+		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+			System.out.println("not empty");
+			return true;
+		}
+		System.out.println("NO RESPONSE YET");
+		return false;
+	}
+
 	private static Instance createManagerInstance(int workerCounter) {
 		//Creates a new Amazon EC2 instance
 		ec2 = AmazonEC2ClientBuilder.standard()
@@ -229,19 +289,19 @@ public class LocalApplication {
 			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
 			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
 			commands.add("java -jar Manager.jar");
-*/
+			 */
 
-/*original
- * 
- * 			commands.add("#!/bin/bash");
+			/*original
+			 * 
+			 * 			commands.add("#!/bin/bash");
 			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
 			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
 			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
 			commands.add("yes | sudo yum install java-1.8.0");
 			commands.add("yes | sudo yum remove java-1.7.0-openjdk");
 			commands.add("sudo java -jar home/ec2-user/Manager.jar " + workerCounter);
-		*/
-			
+			 */
+
 			/* from github
 			 * 		lines.add("#! /bin/bash");
 		lines.add("sudo apt-get update");
@@ -251,7 +311,7 @@ public class LocalApplication {
 		lines.add("sudo wget https://s3.amazonaws.com/ass1jars203822300/manager.zip");
 		lines.add("sudo unzip -P 123456 manager.zip");
 		lines.add("java -jar manager.jar");
-		*/
+			 */
 
 			StringBuilder builder = new StringBuilder();
 
@@ -330,17 +390,17 @@ public class LocalApplication {
 		return null;
 	}
 	private static String createManagerScript() {
-        StringBuilder managerBuild = new StringBuilder();
-        managerBuild.append("#!/bin/bash\n"); 
-        managerBuild.append("sudo su\n");
-        managerBuild.append("yum -y install java-1.8.0 \n");
-        managerBuild.append("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
-        managerBuild.append("aws s3 cp s3://"+bucketName+"/Manager.jar  Manager.jar\n");
-        managerBuild.append("java -jar Manager.jar\n");
+		StringBuilder managerBuild = new StringBuilder();
+		managerBuild.append("#!/bin/bash\n"); 
+		managerBuild.append("sudo su\n");
+		managerBuild.append("yum -y install java-1.8.0 \n");
+		managerBuild.append("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
+		managerBuild.append("aws s3 cp s3://"+bucketName+"/Manager.jar  Manager.jar\n");
+		managerBuild.append("java -jar Manager.jar\n");
 
-        return new String(Base64.encodeBase64(managerBuild.toString().getBytes()));
+		return new String(Base64.encodeBase64(managerBuild.toString().getBytes()));
 
-    }
+	}
 	/*private  static String build2() {
 		String[] lines =new String[] {
 				"#!/bin/bash",
@@ -352,7 +412,7 @@ public class LocalApplication {
 		};
 		return new String(Base64.encode(String.join( "/n", lines).getBytes()));
 	}*/
-				
+
 
 
 	//uploads 3 files, args[0] = input file , args[1] = Manager.jar file, args[2] = Worker.jar file
@@ -363,7 +423,7 @@ public class LocalApplication {
 			File file = null;
 
 			file = new File(args[i]);
-            key = file.getName().replace('\\', '_').replace('/','_').replace(':', '_');
+			key = file.getName().replace('\\', '_').replace('/','_').replace(':', '_');
 			System.out.println("key: " + key + "\n");
 			System.out.println("file: " + file + "\n");
 			PutObjectRequest req = new PutObjectRequest(bucketName, key, file);
