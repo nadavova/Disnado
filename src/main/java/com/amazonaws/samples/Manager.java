@@ -36,6 +36,7 @@ import java.io.FileNotFoundException;
 import java.util.List;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import static java.lang.Thread.sleep;
 
 
 public class Manager {
@@ -70,36 +71,82 @@ public class Manager {
 
 	public static void main(String[] args) throws IOException {
 		BuildTools();
+		localMessageListener();
+		workerMessageListener();
+	}
 
-		//Thread 1
-		Thread LocalManagerMessageReceiveThread = new Thread(() -> {
-			try {
-				localMessageListener();
-			} catch (IOException e) {
-				System.out.println("Couldnt run Thread 1");
-				e.printStackTrace();
+	private static void localMessageListener() throws IOException{
+		S3Object object = getFile(s3);
+		//creates Manager->Worker queue in order to send new tasks to worker
+		myJobWorkerQueueUrl = createAndGetQueue(sqsManagerWorkerNewTask);
+		int numOfUrls = sendUrlsToMessageQueue(object);
+		NumOfUrlsToProcess = numOfUrls; 
+		System.out.println("number of urls : " + numOfUrls);
+		System.out.println("NumOfUrlsToProcess : " + NumOfUrlsToProcess);
+		proceedThread2 = true;
+		System.out.println("proceedThread2: " + proceedThread2);
+		startWorkers(numOfUrls);
+	}
+	
+	private static void startWorkers(int numOfUrls) {
+		System.out.println("startWorkers method");
+		int workersNeeded = numOfUrls / NumberOfMessagesPerWorker;// we get NumberOfMessagesPerWorker(n) from the message queue
+		if(NumberOfactiveWorkers < workersNeeded) {
+			for(int i = 0; i < workersNeeded - NumberOfactiveWorkers; i++)
+				createWorkesrInstance(bucketName);//creates the missing workers
+			NumberOfactiveWorkers = workersNeeded;
+		}
+	}
+	private static List<Instance> createWorkesrInstance(String bucketname) {
+		RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
+		request.setInstanceType(InstanceType.T2Micro.toString());
+		ArrayList<String> commands = new ArrayList<String>();
+		commands.add("#!/bin/bash\n"); //start the bash
+		commands.add("sudo su\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+		commands.add("yum -y install java-1.8.0 \n");
+		commands.add("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
+		commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
+		commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
+		commands.add("# Bootstrap: download jar from S3 and run it");
+		commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Worker.jar" +" -O ./" + "Worker.jar" );
+		commands.add("java -jar Worker.jar");
+
+		StringBuilder builder = new StringBuilder();
+
+		Iterator<String> commandsIterator = commands.iterator();
+
+		while (commandsIterator.hasNext()) {
+			builder.append(commandsIterator.next());
+			if (!commandsIterator.hasNext()) {
+				break;
 			}
-		});
-		LocalManagerMessageReceiveThread.start();
+			builder.append("\n");
+		}
+		request.setIamInstanceProfile(instanceP);
+		String userData = new String(Base64.encode(builder.toString().getBytes()));
+		request.setUserData(userData);
+		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
+		for(Instance instance : instances) {
+			/*CreateTagsRequest requestTag = new CreateTagsRequest();
+			requestTag = requestTag.withResources(instance.getInstanceId())
+					.withTags(new Tag("Worker", ""));
+			ec2.createTags(requestTag);
+			 */
+			//workersList.add(instance);
 
-		//Thread 2
-		Thread ManagerWorkerMessageReceiveThread = new Thread(() -> {
-			workerMessageListener();
-		});
-		ManagerWorkerMessageReceiveThread.start();
+		}
+		workersList.addAll(instances);
+		System.out.println("Launch instance: " + instances);
+
+		return instances;
 	}
 
 	private static void workerMessageListener() {
 		System.out.println("num of urls to process is: " + NumOfUrlsToProcess + "start while loop");
-		System.out.println("PROCEEDTHREAD2 IN THREAD 2: " +proceedThread2 + " start while loop");
-
-		while(!proceedThread2) {
-			
-		}
-		System.out.println("num of urls to process is: " + NumOfUrlsToProcess + "end of while loop");
-		System.out.println("PROCEEDTHREAD2 IN THREAD 2: " +proceedThread2 + " end of while loop");
-
-
 		getMessagesFromDoneTaskQ();
 		File file =createHTML();
 		uploadSummaryFileToS3(file);
@@ -107,6 +154,68 @@ public class Manager {
 		System.out.println("@@@@@MANAGER HAS DONE ALL TASKS@@@@@");
 
 	}
+	
+	private static void getMessagesFromDoneTaskQ() {
+		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
+
+		processedUrl = new String[NumOfUrlsToProcess];
+		UrlList = new String[NumOfUrlsToProcess];
+		int numOfDoneUrls = 0;
+		System.out.println("NumOfUrlsToProcess:  " + NumOfUrlsToProcess);
+
+		while(numOfDoneUrls < NumOfUrlsToProcess) {
+			numOfDoneUrls = waitForResponses(numOfDoneUrls);
+			System.out.println("num of done urls  : " + numOfDoneUrls);
+			//waitSomeTime();
+			//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
+			/*for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+				System.out.println("message (WorkerMessageListener) : " + message);
+				//gets the done url
+				processedUrl[numOfDoneUrls]= message.getBody().split("@@@")[1];
+				UrlList[numOfDoneUrls]= message.getBody().split("@@@")[2];
+
+				String messageRecieptHandle = message.getReceiptHandle();
+				sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, messageRecieptHandle));
+				numOfDoneUrls++;
+			}*/
+		}
+		for(int i = 0; i<processedUrl.length;i++) {
+			System.out.println("processedUrl["+i+"]: " +processedUrl[i]);
+		}
+		for(int i = 0; i<UrlList.length;i++) {
+			System.out.println("UrlList["+i+"]: " +UrlList[i]);
+		}
+		//closeInstances();
+
+
+	}
+	
+	private static int waitForResponses(int numOfDoneUrls) {
+        ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
+        List<Message> messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
+        String response;
+        if (messages.size() > 0) {
+            System.out.println("messages.size() > 0");
+
+            for (int i = 0; i < messages.size(); i++) {
+                System.out.println("not empty");
+                System.out.println("messages.get(i).getBody(): "+ messages.get(i).getBody());
+
+                if (messages.get(i).getBody().startsWith("done image task@@@")) {
+                    System.out.println("GOT RESPONSE!");
+                    response=messages.get(i).getBody();
+    				processedUrl[numOfDoneUrls]= messages.get(i).getBody().split("@@@")[1];
+    				UrlList[numOfDoneUrls]= messages.get(i).getBody().split("@@@")[2];
+    				String reciptHandleOfMsg = messages.get(i).getReceiptHandle();
+                    sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, reciptHandleOfMsg));
+    				numOfDoneUrls++;
+                   }
+                }
+            }
+        else
+            System.out.println("NO RESPONSE");
+        return numOfDoneUrls;
+    }
 	private static void uploadSummaryFileToS3(File HTMLsummaryFile) {
 		System.out.println("UPLOAD SUMMARY FILE TO S3");
 		PutObjectRequest req = new PutObjectRequest(bucketName, "output.html", HTMLsummaryFile);
@@ -127,9 +236,10 @@ public class Manager {
 			for(int i = 0; i< UrlList.length;i++) {
 				System.out.println("INSIDE CREATE HTML LOOP, i = " + i);
 
-				writer.write("<p><img src=" + processedUrl[i] + "><br>");
+				writer.write("<p><img src=" + UrlList[i] + "><br>");
 				writer.write("\n<p>");
-				writer.write(UrlList[i]);
+				writer.write(processedUrl[i]);
+				
 			}
 			writer.write("</body>\n" + "</html>");
 			writer.close();
@@ -159,63 +269,10 @@ public class Manager {
 
 	}
 
-	private static void getMessagesFromDoneTaskQ() {
-		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
-
-		processedUrl = new String[NumOfUrlsToProcess];
-		UrlList = new String[NumOfUrlsToProcess];
-		int numOfDoneUrls = 0;
-		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
-
-		while(numOfDoneUrls < NumOfUrlsToProcess) {
-			System.out.println("num of done urls  : " + numOfDoneUrls);
-			//System.out.println(sqs.receiveMessage(receiveMessageRequest).getMessages().toString());
-			for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
-				System.out.println("message (WorkerMessageListener) : " + message);
-				//gets the done url
-				processedUrl[numOfDoneUrls]= message.getBody().split("@@@")[1];
-				UrlList[numOfDoneUrls]= message.getBody().split("@@@")[2];
-
-				String messageRecieptHandle = message.getReceiptHandle();
-				sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, messageRecieptHandle));
-				numOfDoneUrls++;
-			}
-		}
-		for(int i = 0; i<processedUrl.length;i++) {
-			System.out.println("processedUrl["+i+"]: " +processedUrl[i]);
-		}
-		for(int i = 0; i<UrlList.length;i++) {
-			System.out.println("UrlList["+i+"]: " +UrlList[i]);
-		}
-		//closeInstances();
 
 
-	}
-
-	private static void localMessageListener() throws IOException{
-		S3Object object = getFile(s3);
-		//creates Manager->Worker queue in order to send new tasks to worker
-		myJobWorkerQueueUrl = createAndGetQueue(sqsManagerWorkerNewTask);
-		int numOfUrls = sendUrlsToMessageQueue(object);
-		NumOfUrlsToProcess = numOfUrls; 
-		System.out.println("number of urls : " + numOfUrls);
-		System.out.println("NumOfUrlsToProcess : " + NumOfUrlsToProcess);
-		proceedThread2 = true;
-		System.out.println("proceedThread2: " + proceedThread2);
 
 
-		startWorkers(numOfUrls);
-	}
-
-	private static void startWorkers(int numOfUrls) {
-		System.out.println("startWorkers method");
-		int workersNeeded = numOfUrls / NumberOfMessagesPerWorker;// we get NumberOfMessagesPerWorker(n) from the message queue
-		if(NumberOfactiveWorkers < workersNeeded) {
-			for(int i = 0; i < workersNeeded - NumberOfactiveWorkers; i++)
-				createWorkesrInstance(bucketName);//creates the missing workers
-			NumberOfactiveWorkers = workersNeeded;
-		}
-	}
 
 
 	//sends new tasks(urls) to message queue and returns number of urls to be done.
@@ -312,53 +369,15 @@ public class Manager {
 		return null;
 	}
 
-	private static List<Instance> createWorkesrInstance(String bucketname) {
-		RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
-		request.setInstanceType(InstanceType.T2Micro.toString());
-		ArrayList<String> commands = new ArrayList<String>();
-		commands.add("#!/bin/bash\n"); //start the bash
-		commands.add("sudo su\n");
-		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-		commands.add("echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-		commands.add("yum -y install java-1.8.0 \n");
-		commands.add("alternatives --remove java /usr/lib/jvm/jre-1.7.0-openjdk.x86_64/bin/java\n");
-		commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
-		commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-		commands.add("# Bootstrap: download jar from S3 and run it");
-		commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Worker.jar" +" -O ./" + "Worker.jar" );
-		commands.add("java -jar Worker.jar");
+	  private static void waitSomeTime() {
+	        try {
+	            System.out.println("wait loop - trying to get all The Workers OCR Text..");
+	            sleep(8000);
+	        } catch (InterruptedException e) {
+	            e.printStackTrace();
+	        }
+	    }
 
-		StringBuilder builder = new StringBuilder();
-
-		Iterator<String> commandsIterator = commands.iterator();
-
-		while (commandsIterator.hasNext()) {
-			builder.append(commandsIterator.next());
-			if (!commandsIterator.hasNext()) {
-				break;
-			}
-			builder.append("\n");
-		}
-		request.setIamInstanceProfile(instanceP);
-		String userData = new String(Base64.encode(builder.toString().getBytes()));
-		request.setUserData(userData);
-		List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
-		for(Instance instance : instances) {
-			/*CreateTagsRequest requestTag = new CreateTagsRequest();
-			requestTag = requestTag.withResources(instance.getInstanceId())
-					.withTags(new Tag("Worker", ""));
-			ec2.createTags(requestTag);
-			 */
-			//workersList.add(instance);
-
-		}
-		workersList.addAll(instances);
-		System.out.println("Launch instance: " + instances);
-
-		return instances;
-	}
 	/*private static void closeInstances() {
         List<String> toCloseList = new ArrayList<>();
         if (workersList != null) {

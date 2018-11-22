@@ -1,4 +1,5 @@
 package com.amazonaws.samples;
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -9,6 +10,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -68,6 +70,7 @@ public class LocalApplication {
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
 	public static IamInstanceProfileSpecification instanceP;
+	public static Message messageFromDoneQ;
 
 	public static void main(String[] args) throws IOException, InterruptedException {
 		long startTime = System.currentTimeMillis();
@@ -96,7 +99,7 @@ public class LocalApplication {
 		System.out.println("mySendqueue : " + mySendQueueUrl);
 		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
 		System.out.println("before creating manager instance.\n");
-		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
+		//Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
 
 		System.out.println("myreceivequeue : " + myReceiveQueueUrl);
 		System.out.println("Before createS3.\n");
@@ -127,19 +130,17 @@ public class LocalApplication {
 		 *  and the response is available on S3.
 		 */
 		System.out.println("BEFORE RECEIVE MESSAGE TO DOWNLOAD");
-		sleep(10000);
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
 		System.out.println("receivemessagereqeust: " + receiveMessageRequest.toString());
 		System.out.println("before waste of time while loop listens to done queue");
 
-		while(sqs.receiveMessage(receiveMessageRequest).getMessages()==null) {}
 		System.out.println("after waste of time while loop listens to done queue");
 
-		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
 			System.out.println("MESSAGE RECEIVED");
-			if(message == null)
-				continue;
-			else {
+			if(messageFromDoneQ == null)
+				System.out.println("MessageFromDoneQ is null");
+
+			
 				System.out.println("MESSAGE ABOUT NEW UPLOAD(SUMMARY FILE) RECEIVED");
 
 				/*
@@ -150,20 +151,28 @@ public class LocalApplication {
 				S3Object object;
 				try {
 					object = s3.getObject(new GetObjectRequest(bucketName, "output.html"));//change hard coded url name
+					System.out.println("SUMMARY OBJECT HAS BEEN DOWNLOADED");
+
+					String messageRecieptHandle = messageFromDoneQ.getReceiptHandle();
+					sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
+					System.out.println("MESSAGE ABOUT DONE SUMMARY FILE DELETED");
+
+					//TODO: add HTML export
+					
+					System.out.println("START TO EXPORT SUMMARY FILE TOC:\\\\workingManagerToDelete\"+ \"OutputSummary.html ");
+					final BufferedInputStream i = new BufferedInputStream(object.getObjectContent());
+					InputStream objectData = object.getObjectContent();
+					Files.copy(objectData, new File("C:\\" + "output.html").toPath()); //location to local path
+					objectData.close();
 				}
 				catch (Exception e) {
-					continue;
+					System.out.println("exception in getObject method");
+
 				}
-				System.out.println("SUMMARY OBJECT HAS BEEN DOWNLOADED");
 
-				String messageRecieptHandle = message.getReceiptHandle();
-				sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
-				System.out.println("MESSAGE ABOUT DONE SUMMARY FILE DELETED");
-
-				//TODO: add HTML export
-				System.out.println("START TO EXPORT SUMMARY FILE TOC:\\\\workingManagerToDelete\"+ \"OutputSummary.html ");
-
-				String path = "C:\\workingManagerToDelete"+ "OutputSummary.html" ;//need to fix \ is missing
+				
+				/*
+				String path = "C:\\workingManagerToDelete\OutputSummary.html" ;//need to fix \ is missing
 				InputStream in = object.getObjectContent();
 				byte[] buf = new byte[1024];
 				OutputStream out = new FileOutputStream(path);
@@ -178,15 +187,17 @@ public class LocalApplication {
 				   out.write(buf, 0, count);
 				}
 				out.close();
-				in.close();
+				in.close();*/
 				System.out.println("DOWNLOADING SUMMARY FILE TO LOCAL COMPUTER DONE");
-				s3.deleteObject(bucketName, message.getBody());
-			}
-		}
+				System.out.println("DELETE MESSAGE FROM LOCAL Q: "+ messageFromDoneQ.getBody());
+
+				s3.deleteObject(bucketName, messageFromDoneQ.getBody());
+			
+		
 
 
 
-		if(terminate) {
+		/*if(terminate) {
 			sqs.sendMessage(new SendMessageRequest(mySendQueueUrl,"$$terminate"));
 			boolean areDeadWorkers = false;
 			while (!areDeadWorkers) {
@@ -203,7 +214,7 @@ public class LocalApplication {
 					}
 				}
 			}
-		}
+		}*/
 
 		long endTime   = System.currentTimeMillis();
 		long totalTime = endTime - startTime;
@@ -218,6 +229,7 @@ public class LocalApplication {
 
 		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
 			System.out.println("not empty");
+			messageFromDoneQ = message;
 			return true;
 		}
 		System.out.println("NO RESPONSE YET");
