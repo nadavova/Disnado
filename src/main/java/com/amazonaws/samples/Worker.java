@@ -40,6 +40,7 @@ public class Worker {
 	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
 	private static String URLToParse = null;
 	private static String outputText = null;
+	private static String fileName = null;
 
 	
 	public static void main(String[]args) {
@@ -57,11 +58,11 @@ public class Worker {
 		
 		
 	}
-	// message : [0]done image task, [1] processed text [2]URL
+	// message : [0]done image task, [1] processed text [2]URL [3]filename
 	private static void sendProcessedMessageToManagerQ() {
 		System.out.println("@@@@@@@@@@@@@SEND PROCESSED MESSAGE TO Q @@@@@@@@@@@@@@@@");
 		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
-		sqs.sendMessage(new SendMessageRequest(sqsWorkerManagerDoneTask, "done image task@@@" +outputText +"@@@" + URLToParse));
+		sqs.sendMessage(new SendMessageRequest(sqsWorkerManagerDoneTask, "done image task@@@" +outputText +"@@@" + URLToParse + "@@@" + fileName ));
 		
 	}
 	private static void BuildTools() {
@@ -91,6 +92,7 @@ public class Worker {
 		for (Message message : messages) {
 			parseMessage = message.getBody().split("@@@");
 			URLToParse = parseMessage[2];
+			fileName = parseMessage[3];
 			System.out.println(i + ") URLtoParse : " + URLToParse);
 			String messageRecieptHandle = message.getReceiptHandle();
 			System.out.println("@@@@@@@@@@@@@DELETE MESSAGE FROM QUEUE : " + message + "@@@@@@@@@@@@@@@@");

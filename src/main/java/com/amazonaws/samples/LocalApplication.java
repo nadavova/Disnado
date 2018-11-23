@@ -150,7 +150,7 @@ public class LocalApplication {
 
 				S3Object object;
 				try {
-					object = s3.getObject(new GetObjectRequest(bucketName, "output.html"));//change hard coded url name
+					object = s3.getObject(new GetObjectRequest(bucketName, messageFromDoneQ.getBody().split("@@@")[2]));
 					System.out.println("SUMMARY OBJECT HAS BEEN DOWNLOADED");
 
 					String messageRecieptHandle = messageFromDoneQ.getReceiptHandle();
@@ -162,7 +162,7 @@ public class LocalApplication {
 					System.out.println("START TO EXPORT SUMMARY FILE TOC:\\\\workingManagerToDelete\"+ \"OutputSummary.html ");
 					final BufferedInputStream i = new BufferedInputStream(object.getObjectContent());
 					InputStream objectData = object.getObjectContent();
-					Files.copy(objectData, new File("C:\\" + "output.html").toPath()); //location to local path
+					Files.copy(objectData, new File("C:\\" + messageFromDoneQ.getBody().split("@@@")[2]).toPath()); //location to local path
 					objectData.close();
 				}
 				catch (Exception e) {
@@ -205,8 +205,11 @@ public class LocalApplication {
 				for(Message message : sqs.receiveMessage(receiveMessageRequest1).getMessages()) {
 					if(message.getBody().equals("$$WorkersTerminated")) {
 						List<String> instances = new ArrayList<String>();
-						instances.add(managerInstance.getInstanceId());
-						TerminateInstancesRequest req = new TerminateInstancesRequest(instances);
+						instances.add(managerInstance.getIns
+
+
+
+inateInstancesRequest(instances);
 						ec2.terminateInstances(req);
 						String messageRecieptHandle = message.getReceiptHandle();
 						sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
@@ -289,41 +292,7 @@ public class LocalApplication {
 			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
 			commands.add("# Bootstrap: download jar from S3 and run it");
 			commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Manager.jar" +" -O ./" + "Manager.jar" );
-			//
-			//commands.add("aws s3 cp https://s3.amazonaws.com/akiajbjbasaiw6nhkk7a/Manager.jar home/ec2-user/Manager.jar");
-			//commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
 			commands.add("java -jar Manager.jar");
-			/*
-			commands.add("#!/bin/bash");
-			commands.add("sudo apt-get update");
-			commands.add("sudo apt-get install openjdk-8-jre-headless -y");
-			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
-			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
-			commands.add("java -jar Manager.jar");
-			 */
-
-			/*original
-			 * 
-			 * 			commands.add("#!/bin/bash");
-			commands.add("aws configure set aws_access_key_id " + new ProfileCredentialsProvider().getCredentials().getAWSAccessKeyId());
-			commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
-			commands.add("aws s3 cp s3://" + bucketName + "/Manager.jar home/ec2-user/Manager.jar");
-			commands.add("yes | sudo yum install java-1.8.0");
-			commands.add("yes | sudo yum remove java-1.7.0-openjdk");
-			commands.add("sudo java -jar home/ec2-user/Manager.jar " + workerCounter);
-			 */
-
-			/* from github
-			 * 		lines.add("#! /bin/bash");
-		lines.add("sudo apt-get update");
-		lines.add("sudo apt-get install openjdk-8-jre-headless -y");
-		lines.add("sudo apt-get install wget -y");
-		lines.add("sudo apt-get install unzip -y");
-		lines.add("sudo wget https://s3.amazonaws.com/ass1jars203822300/manager.zip");
-		lines.add("sudo unzip -P 123456 manager.zip");
-		lines.add("java -jar manager.jar");
-			 */
 
 			StringBuilder builder = new StringBuilder();
 
