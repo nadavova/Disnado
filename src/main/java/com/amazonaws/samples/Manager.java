@@ -1,6 +1,5 @@
 package com.amazonaws.samples;
 
-
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.AWSCredentialsProvider;
@@ -51,7 +50,7 @@ public class Manager {
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
 
-
+	static final Object lockLock = new Object();
 	private static String sqsManagerWorkerNewTask = "sqsManagerWorkerNewTask";
 	private static String sqsWorkerManagerDoneTask = "sqsWorkerManagerDoneTask";
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
@@ -67,10 +66,11 @@ public class Manager {
 
 
 	private static class clientThread implements Runnable {
+
 		private static int numOfUrlsPerWorker;
 		private static int NumberOfactiveWorkers ;
-		private static int numberOfURLS ;
-		private static int numOfDoneUrls;
+		private static int numberOfURLS  = 0;
+		private static int numOfDoneUrls = 0;
 		private static String fileNameRecievedFromWorker;
 		private static String inputFileName;
 		private static ArrayList<String> processedUrlList ;
@@ -82,14 +82,26 @@ public class Manager {
 				synchronized (lock) {
 					processedUrlList.add(inputFileName);
 					ArrayDoneTasks.add(processedUrlList);
+					localMessageListener();
+					//rebootInstance();
 				}
-				localMessageListener();
 			} catch (IOException e) {
-				System.out.println("=====================Could not catch lock=====================");
 				e.printStackTrace();
 			}
 			workerMessageListener();
+			numOfDoneUrls = 0;
 			Thread.currentThread().interrupt();
+		}
+		private static void rebootInstance() {
+			if (workersList != null) {
+				for (Instance i : workersList) {
+					if(i.getState().getName().equals("terminated") || i.getState().getName().equals("shutting-down")) {
+						RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
+						request.setUserData("aws ec2 reboot-instances --instance-ids " + i.getImageId());
+						ec2.runInstances(request).getReservation().getInstances().get(0);
+						}
+					}
+				}
 		}
 
 		private static void localMessageListener() throws IOException{
@@ -100,7 +112,7 @@ public class Manager {
 		}
 
 		private static void startWorkers() {
-			synchronized(workerLock) {
+			synchronized(workerLock){
 				System.out.println("=====================startWorkers method=====================");
 				System.out.println("NumberOfactiveWorkers: " + NumberOfactiveWorkers);
 				System.out.println("numberOfURLS: " + numberOfURLS);
@@ -163,11 +175,13 @@ public class Manager {
 		}
 
 		private static void getMessagesFromDoneTaskQ() {
+			synchronized(lockLock) {
 			System.out.println("=====================numberOfURLS:  " + numberOfURLS + "=====================");
 			System.out.println("=====================Waiting for response=====================");
 			while(numOfDoneUrls < numberOfURLS) {
 				numOfDoneUrls = waitForResponses();
 				System.out.println(numOfDoneUrls);
+			}
 			}
 		}
 
@@ -358,13 +372,12 @@ public class Manager {
 					client.NumberOfactiveWorkers=0;
 					client.numOfUrlsPerWorker = Integer.parseInt(parseMessage[3]);
 					client.inputFileName = parseMessage[2].substring(parseMessage[2].lastIndexOf("\\")+1);
-					client.numberOfURLS = 0 ;
-					client.numOfDoneUrls = 0;
 					client.fileNameRecievedFromWorker = "";
 					client.processedUrlList = new ArrayList<String>();
 					client.workersList = new ArrayList<Instance>();
 					System.out.println("=====================input File Name: " + client.inputFileName + "=====================");
-					new Thread(client).start();
+					Thread managerThread = new Thread(client);
+					managerThread.start();
 					String messageRecieptHandle = message.getReceiptHandle();
 					sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
 				}
