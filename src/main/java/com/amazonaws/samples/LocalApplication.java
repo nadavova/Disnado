@@ -1,6 +1,7 @@
 package com.amazonaws.samples;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -9,15 +10,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
-import java.io.UnsupportedEncodingException;
+import java.io.FileWriter;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
+
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 
 
 import org.apache.commons.codec.binary.Base64;
@@ -40,7 +41,7 @@ import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.Tag;
 import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
-import com.amazonaws.services.iot.model.CannedAccessControlList;
+import com.amazonaws.services.s3.model.CannedAccessControlList;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.Bucket;
@@ -57,8 +58,6 @@ import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
-import com.amazonaws.services.s3.transfer.MultipleFileDownload;
-//import com.amazonaws.util.Base64;
 import static java.lang.Thread.sleep;
 
 public class LocalApplication {
@@ -76,6 +75,7 @@ public class LocalApplication {
 	public static void main(String[] args) throws IOException, InterruptedException {
 		long startTime = System.currentTimeMillis();
 		boolean terminate = false;
+
 		System.out.println("=====================bucketName: " + bucketName + "=====================");
 		if(args[args.length - 1].equals("terminate")) {
 			terminate = true;
@@ -106,76 +106,60 @@ public class LocalApplication {
 		 */
 		System.out.println("=====================RECEIVE MESSAGE TO DOWNLOAD=====================");
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
-			System.out.println("=====================MESSAGE RECEIVED=====================");
-			if(messageFromDoneQ == null)
-				System.out.println("=====================MessageFromDoneQ is null=====================");
-				System.out.println("=====================MESSAGE ABOUT NEW UPLOAD(SUMMARY FILE) RECEIVED=====================");
-				/*
-				 * The application will download the response from S3.
-				 */
-				System.out.println("=====================DOWNLOADING RESPONSE HTML file FROM S3=====================");
-				S3Object object;
-				try {
-					object = s3.getObject(new GetObjectRequest(bucketName, messageFromDoneQ.getBody().split("@@@")[2]));
-					System.out.println("=====================SUMMARY OBJECT HAS BEEN DOWNLOADED=====================");
-					String messageRecieptHandle = messageFromDoneQ.getReceiptHandle();
-					sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
-					System.out.println("=====================MESSAGE ABOUT DONE SUMMARY FILE DELETED=====================");					
-					System.out.println("=====================EXPORT SUMMARY FILE=====================");
-					/*final BufferedInputStream i = new BufferedInputStream(object.getObjectContent());
-					InputStream objectData = object.getObjectContent();
-					Files.copy(objectData, new File("C:\\" + messageFromDoneQ.getBody().split("@@@")[2]).toPath()); //location to local path
-					objectData.close();*/
-					System.out.println("file name : " + messageFromDoneQ.getBody().split("@@@")[2]);
-					try {
-						File f = new File("C:\\workingManagerToDelete");
-						TransferManager xfer_mgr = TransferManagerBuilder.standard().build();
-					    Download xfer = xfer_mgr.download(bucketName, messageFromDoneQ.getBody().split("@@@")[2], f);
+		System.out.println("=====================MESSAGE RECEIVED=====================");
+		if(messageFromDoneQ == null)
+			System.out.println("=====================MessageFromDoneQ is null=====================");
+		System.out.println("=====================MESSAGE ABOUT NEW UPLOAD(SUMMARY FILE) RECEIVED=====================");
+		/*
+		 * The application will download the response from S3.
+		 */
+		System.out.println("=====================DOWNLOADING RESPONSE HTML file FROM S3=====================");
+		S3Object object;
+		try {
+			object = s3.getObject(new GetObjectRequest(bucketName, messageFromDoneQ.getBody().split("@@@")[2]));
+			System.out.println("=====================SUMMARY OBJECT HAS BEEN DOWNLOADED=====================");
+			String messageRecieptHandle = messageFromDoneQ.getReceiptHandle();
+			sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
+			System.out.println("=====================MESSAGE ABOUT DONE SUMMARY FILE DELETED=====================");					
+			System.out.println("=====================EXPORT SUMMARY FILE=====================");
 
-					} catch (AmazonServiceException e) {
-						System.out.println("couldnt download file");
+			System.out.println("file name : " + messageFromDoneQ.getBody().split("@@@")[2]);
+			try{
+				// Create file 
+				BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
+				FileWriter fstream=new FileWriter(messageFromDoneQ.getBody().split("@@@")[2]);
 
-					    System.err.println(e.getErrorMessage());
-					    System.exit(1);
-					}
+				BufferedWriter out = new BufferedWriter(fstream);
+				String line;
+				while ((line = reader.readLine()) != null) {
+					out.write(line);
 				}
-				catch (Exception e) {
-					System.out.println("exception in getObject method");
-
-				}
-				System.out.println("=====================DOWNLOADING SUMMARY FILE TO LOCAL COMPUTER DONE=====================");
-				System.out.println("=====================DELETE MESSAGE FROM LOCAL QUEUE=====================");
-				s3.deleteObject(bucketName, messageFromDoneQ.getBody());
-		/*if(terminate) {
-			sqs.sendMessage(new SendMessageRequest(mySendQueueUrl,"$$terminate"));
-			boolean areDeadWorkers = false;
-			while (!areDeadWorkers) {
-				ReceiveMessageRequest receiveMessageRequest1 = new ReceiveMessageRequest(myReceiveQueueUrl);
-				for(Message message : sqs.receiveMessage(receiveMessageRequest1).getMessages()) {
-					if(message.getBody().equals("$$WorkersTerminated")) {
-						List<String> instances = new ArrayList<String>();
-						instances.add(managerInstance.getIns
-inateInstancesRequest(instances);
-						ec2.terminateInstances(req);
-						String messageRecieptHandle = message.getReceiptHandle();
-						sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
-						areDeadWorkers = true;
-					}
-				}
+				//Close the output stream
+				out.close();
+			}catch (Exception e){//Catch exception if any
+				System.err.println("Error: " + e.getMessage());
 			}
-		}*/
+		}
+		catch (Exception e) {
+			System.out.println("exception in getObject method");
+
+		}
+		System.out.println("=====================DOWNLOADING SUMMARY FILE TO LOCAL COMPUTER DONE=====================");
+		System.out.println("=====================DELETE MESSAGE FROM LOCAL QUEUE=====================");
+		s3.deleteObject(bucketName, messageFromDoneQ.getBody());
+
 		long endTime   = System.currentTimeMillis();
 		long totalTime = endTime - startTime;
 		System.out.println(totalTime);
 		System.out.println("=====================COMPLETED=====================");
 	}
-	
+
 	private static void buildTools() {
 		ec2 = AmazonEC2ClientBuilder.standard()
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
-		
+
 		s3 = AmazonS3ClientBuilder.standard()
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
@@ -185,7 +169,7 @@ inateInstancesRequest(instances);
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
-		
+
 		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
 		IAMinstance = new IamInstanceProfileSpecification();
@@ -232,7 +216,6 @@ inateInstancesRequest(instances);
 		try {
 			//creates manager instance  
 			RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
-			request.setKeyName("test");
 			request.withKeyName("test");
 			request.setIamInstanceProfile(IAMinstance);
 			//request.withSecurityGroups("Nadav");
@@ -261,9 +244,9 @@ inateInstancesRequest(instances);
 			String userData = new String(Base64.encodeBase64(builder.toString().getBytes()));
 			request.setUserData(userData);
 			instance = ec2.runInstances(request).getReservation().getInstances().get(0);
-            CreateTagsRequest tagReq = new CreateTagsRequest();
-            tagReq = tagReq.withResources(instance.getInstanceId()).withTags(new Tag("Manager", ""));
-            ec2.createTags(tagReq);
+			CreateTagsRequest tagReq = new CreateTagsRequest();
+			tagReq = tagReq.withResources(instance.getInstanceId()).withTags(new Tag("Manager", ""));
+			ec2.createTags(tagReq);
 			System.out.println("=====================Launch instance: " + instance + "=====================");
 		} catch (AmazonServiceException ase) {
 			System.out.println("Exception: Cannot create instance : "+ ase);
@@ -311,7 +294,7 @@ inateInstancesRequest(instances);
 		}
 		return null;
 	}
-	
+
 
 	//uploads 3 files, args[0] = input file , args[1] = Manager.jar file, args[2] = Worker.jar file
 	private static void uploadFiles( String[] args) {     
@@ -325,6 +308,8 @@ inateInstancesRequest(instances);
 			System.out.println("key: " + key + "\n");
 			System.out.println("file: " + file + "\n");
 			PutObjectRequest req = new PutObjectRequest(bucketName, key, file);
+			req.setCannedAcl(CannedAccessControlList.PublicRead);
+
 			//req.setCannedAcl(CannedAccessControlList.PublicRead);
 			//The application will send a message to a specified SQS queue, stating the location of the images list on S3
 			s3.putObject(req);

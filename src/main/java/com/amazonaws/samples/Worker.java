@@ -124,6 +124,7 @@ public class Worker {
         ocr.stopEngine();
 		
 	}
+	
 	private static String createAndGetQueue(String queueName) {
 		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
 			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))

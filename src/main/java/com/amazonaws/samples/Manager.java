@@ -14,6 +14,7 @@ import com.amazonaws.services.ec2.model.InstanceType;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
+import com.amazonaws.services.iot.model.CannedAccessControlList;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.GetObjectRequest;
@@ -116,6 +117,7 @@ public class Manager {
 				RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
 				request.setInstanceType(InstanceType.T2Micro.toString());
 				request.setIamInstanceProfile(instanceP);
+
 				ArrayList<String> commands = new ArrayList<String>();
 				//Start worker script
 				commands.add("#!/bin/bash\n"); 
