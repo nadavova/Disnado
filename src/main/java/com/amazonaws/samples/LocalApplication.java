@@ -67,7 +67,7 @@ public class LocalApplication {
 	public static IamInstanceProfileSpecification IAMinstance;
 	public static Message messageFromDoneQ;
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
-	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
+	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();//rename bucket
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
