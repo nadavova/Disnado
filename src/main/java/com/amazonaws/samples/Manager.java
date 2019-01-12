@@ -1,5 +1,3 @@
-package com.amazonaws.samples;
-
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.AWSCredentialsProvider;
@@ -38,80 +36,91 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import static java.lang.Thread.sleep;
 
 
 public class Manager {
+	
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
 	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
 	private static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
-
-	static final Object lockLock = new Object();
 	private static String sqsManagerWorkerNewTask = "sqsManagerWorkerNewTask";
 	private static String sqsWorkerManagerDoneTask = "sqsWorkerManagerDoneTask";
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
-	private static String  myReceiveQueueUrl, myJobWorkerQueueUrl, myDoneWorkerQueueUrl, mySendQueueUrl;
-	//private static List<Instance> workersList = new ArrayList<Instance>();
-	public static IamInstanceProfileSpecification instanceP;
-	public static boolean proceedThread2 = false;
-	private static ArrayList<ArrayList<String>> ArrayDoneTasks = new ArrayList<ArrayList<String>>();
+	private static String myReceiveQueueUrl, myJobWorkerQueueUrl, myDoneWorkerQueueUrl, mySendQueueUrl;
+	private static List<String[]> safeListOfTasks = new CopyOnWriteArrayList<String[]>();
 	static final Object lock = new Object();
-	static final Object HTMLlock = new Object();
-	static final Object workerLock = new Object();
+	static final Object clientLock = new Object();
+	public static IamInstanceProfileSpecification instanceP;
 
 
-	private static class clientThread implements Runnable {
+	private static class clientThread extends Thread {
 
-		private static int numOfUrlsPerWorker;
-		private static int NumberOfactiveWorkers ;
-		private static int numberOfURLS  = 0;
-		private static int numOfDoneUrls = 0;
-		private static String fileNameRecievedFromWorker;
-		private static String inputFileName;
-		private static ArrayList<String> processedUrlList ;
-		private static List<Instance> workersList ;
+		static final Object lock = new Object();
+		static final Object upLock = new Object();
+		static final Object doneLock = new Object();
+		static final Object lockLock = new Object();
+		static final Object HTMLlock = new Object();
+		static final Object workerLock = new Object();
+		private ArrayList<ArrayList<String>> ArrayDoneTasks = new ArrayList<ArrayList<String>>();
+		private ArrayList<String> processedUrlList = new ArrayList<String>(); ;
+		private int numOfUrlsPerWorker;
+		private int NumberOfactiveWorkers ;
+		private int numberOfURLS ;
+		private int numOfDoneUrls = 0;
+		private String fileNameRecievedFromWorker;
+		private String inputFileName;
+		public clientThread(String inputFileName , String clientID , int numOfUrlsPerWorker) {
+			synchronized(lock) {
+				this.numOfUrlsPerWorker = numOfUrlsPerWorker;
+				this.inputFileName = inputFileName;
+				
+			}
+		}
 
-		@Override
+
+
 		public void run() {
+
 			try {
-				synchronized (lock) {
-					processedUrlList.add(inputFileName);
-					ArrayDoneTasks.add(processedUrlList);
-					localMessageListener();
-					//rebootInstance();
-				}
+				fileNameRecievedFromWorker = inputFileName;
+				processedUrlList.add(inputFileName);
+				ArrayDoneTasks.add(processedUrlList);
+				localMessageListener(numOfUrlsPerWorker,inputFileName,numberOfURLS,NumberOfactiveWorkers,numOfDoneUrls ,ArrayDoneTasks , fileNameRecievedFromWorker );
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			workerMessageListener();
-			numOfDoneUrls = 0;
+			//rebootInstance();
 			Thread.currentThread().interrupt();
 		}
-		private static void rebootInstance() {
+
+		private static void rebootInstance(List<Instance> workersList) {
 			if (workersList != null) {
 				for (Instance i : workersList) {
 					if(i.getState().getName().equals("terminated") || i.getState().getName().equals("shutting-down")) {
 						RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
 						request.setUserData("aws ec2 reboot-instances --instance-ids " + i.getImageId());
 						ec2.runInstances(request).getReservation().getInstances().get(0);
-						}
 					}
 				}
+			}
 		}
 
-		private static void localMessageListener() throws IOException{
-			S3Object object = getFile();
-			numberOfURLS = sendUrlsToMessageQueue(object);
+		private static void localMessageListener(int numOfUrlsPerWorker,String inputFileName,int numberOfURLS,int NumberOfactiveWorkers,int numOfDoneUrls,ArrayList<ArrayList<String>> ArrayDoneTasks , String fileNameRecievedFromWorker ) throws IOException{
+			S3Object object = getFile(inputFileName);
+			numberOfURLS = sendUrlsToMessageQueue(object,inputFileName);
 			System.out.println("numberOfURLS : " + numberOfURLS);
-			startWorkers();
+			startWorkers(numOfUrlsPerWorker,numberOfURLS,NumberOfactiveWorkers,numOfDoneUrls, ArrayDoneTasks ,  fileNameRecievedFromWorker );
 		}
 
-		private static void startWorkers() {
+		private static void startWorkers(int numOfUrlsPerWorker ,int numberOfURLS,int NumberOfactiveWorkers ,int numOfDoneUrls,ArrayList<ArrayList<String>> ArrayDoneTasks , String fileNameRecievedFromWorker ) {
+			List<Instance> workersList = new ArrayList<Instance>(); ;
 			synchronized(workerLock){
 				System.out.println("=====================startWorkers method=====================");
 				System.out.println("NumberOfactiveWorkers: " + NumberOfactiveWorkers);
@@ -119,19 +128,18 @@ public class Manager {
 				System.out.println("numOfUrlsPerWorker: " + numOfUrlsPerWorker);
 				if(NumberOfactiveWorkers < (numberOfURLS / numOfUrlsPerWorker)) {
 					for(int i = 0; i < (numberOfURLS / numOfUrlsPerWorker) - NumberOfactiveWorkers; i++)
-						//creates the missing workers
-						createWorkesrInstance();
+						workersList.addAll(createWorkesrInstance());
 					NumberOfactiveWorkers = numberOfURLS / numOfUrlsPerWorker;
 				}}
+			workerMessageListener(numOfUrlsPerWorker,numOfDoneUrls,numberOfURLS, ArrayDoneTasks, fileNameRecievedFromWorker, workersList);
 		}
+
 		private static List<Instance> createWorkesrInstance() {
 			try {
 				RunInstancesRequest request = new RunInstancesRequest("ami-0ff8a91507f77f867", 1, 1);
 				request.setInstanceType(InstanceType.T2Micro.toString());
 				request.setIamInstanceProfile(instanceP);
-
 				ArrayList<String> commands = new ArrayList<String>();
-				//Start worker script
 				commands.add("#!/bin/bash\n"); 
 				commands.add("sudo su\n");
 				commands.add("yum -y install java-1.8.0 \n");
@@ -140,7 +148,6 @@ public class Manager {
 				commands.add("aws configure set aws_secret_access_key " + new ProfileCredentialsProvider().getCredentials().getAWSSecretKey());
 				commands.add("wget https://"+ bucketName + ".s3.amazonaws.com/" + "Worker.jar" +" -O ./" + "Worker.jar" );
 				commands.add("java -jar Worker.jar");
-
 				StringBuilder builder = new StringBuilder();
 				Iterator<String> commandsIterator = commands.iterator();
 
@@ -154,7 +161,6 @@ public class Manager {
 				String userData = new String(Base64.encode(builder.toString().getBytes()));
 				request.setUserData(userData);
 				List<Instance> instances = ec2.runInstances(request).getReservation().getInstances();
-				workersList.addAll(instances);
 				System.out.println("=====================Launch instance: " + instances + "=====================");
 				return instances;
 			}
@@ -164,62 +170,76 @@ public class Manager {
 			return null;
 		}
 
-		private static void workerMessageListener() {
+		private static void workerMessageListener(int numOfUrlsPerWorker,int numOfDoneUrls,int numberOfURLS,ArrayList<ArrayList<String>> ArrayDoneTasks,String fileNameRecievedFromWorker,List<Instance> workersList) {
 			System.out.println("Number of URLs to process is: " + numberOfURLS);
-			getMessagesFromDoneTaskQ();
-			File file =createHTML();
-			String name = uploadSummaryFileToS3(file);
+			getMessagesFromDoneTaskQ(numOfUrlsPerWorker,numOfDoneUrls,numberOfURLS, ArrayDoneTasks, fileNameRecievedFromWorker );
+			File file =createHTML(ArrayDoneTasks, fileNameRecievedFromWorker);
+			String name = uploadSummaryFileToS3(file, fileNameRecievedFromWorker);
 			sendMessageToFileDoneQ(name);
 			System.out.println("=====================MANAGER HAS DONE ALL TASKS=====================");
-			closeInstances();
+			closeInstances(workersList);
 		}
 
-		private static void getMessagesFromDoneTaskQ() {
+		private static String getMessagesFromDoneTaskQ(int numOfUrlsPerWorker, int numOfDoneUrls ,int numberOfURLS,ArrayList<ArrayList<String>> ArrayDoneTasks ,String fileNameRecievedFromWorker) {
+			container c = new container();
 			synchronized(lockLock) {
-			System.out.println("=====================numberOfURLS:  " + numberOfURLS + "=====================");
-			System.out.println("=====================Waiting for response=====================");
-			while(numOfDoneUrls < numberOfURLS) {
-				numOfDoneUrls = waitForResponses();
-				System.out.println(numOfDoneUrls);
+
+				System.out.println("=====================numberOfURLS:  " + numberOfURLS + "=====================");
+				System.out.println("=====================Waiting for response=====================");
+				while(numOfDoneUrls < numberOfURLS) {
+					c =  waitForResponses(numOfUrlsPerWorker,numOfDoneUrls, ArrayDoneTasks, fileNameRecievedFromWorker,numberOfURLS);
+					numOfDoneUrls = c.getNumOfDoneUrls();
+					System.out.println(numOfDoneUrls);
+
+				}
 			}
-			}
+			return c.getInput();
 		}
 
-		private static int waitForResponses() {
-			ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
-			List<Message> messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
-			String[] response;
-			if (messages.size() > 0) {
-				for (int i = 0; i < messages.size(); i++) {
-					System.out.println("=====================GOT RESPONSE!=====================");
-					response=messages.get(i).getBody().split("@@@");
-					System.out.println("numOfUrlsPerWorker:" + numOfUrlsPerWorker);
-					fileNameRecievedFromWorker = response[3];
-					for(ArrayList<String>  temp : ArrayDoneTasks) {
-						if(temp.contains(fileNameRecievedFromWorker)) {
-							temp.add(response[1] + "@@@" + response[2]);
+		private static container waitForResponses(int numOfUrlsPerWorker,int numOfDoneUrls,ArrayList<ArrayList<String>> ArrayDoneTasks,String fileNameRecievedFromWorker,int numberOfURLS) {
+			container c = new container();
+			int doneURLS = 0;
+			while(doneURLS != numberOfURLS ) {
+				ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myDoneWorkerQueueUrl);
+				List<Message> messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
+				String[] response;
+				if (messages.size() > 0) {
+					for (int i = 0; i < messages.size(); i++) {
+						System.out.println("=====================GOT RESPONSE!=====================");
+						response=messages.get(i).getBody().split("@@@");
+						System.out.println("numOfUrlsPerWorker:" + numOfUrlsPerWorker);
+						c.setInput(fileNameRecievedFromWorker = response[3]); 
+						for(ArrayList<String>  temp : ArrayDoneTasks) {
+							if(temp.contains(fileNameRecievedFromWorker)) {
+								temp.add(response[1] + "@@@" + response[2]);
+								String reciptHandleOfMsg = messages.get(i).getReceiptHandle();
+								sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, reciptHandleOfMsg));
+								doneURLS++;
+							}
 						}
+
+						numOfDoneUrls++;
 					}
-					String reciptHandleOfMsg = messages.get(i).getReceiptHandle();
-					sqs.deleteMessage(new DeleteMessageRequest(myDoneWorkerQueueUrl, reciptHandleOfMsg));
-					numOfDoneUrls++;
 				}
 			}
 			//else
 			//System.out.println("=====================NO RESPONSE=====================");
-			return numOfDoneUrls;
+			c.setNumOfDoneUrls(numOfDoneUrls);
+			return c;
 		}
 
-		private static String uploadSummaryFileToS3(File HTMLsummaryFile) {
-			System.out.println("=====================UPLOAD SUMMARY FILE TO S3=====================");
-			String name = "output"+fileNameRecievedFromWorker + ".html";
-			PutObjectRequest req = new PutObjectRequest(bucketName, name, HTMLsummaryFile);
-			s3.putObject(req);
-			System.out.println("=====================UPLOAD SUMMARY FILE TO S3 COMPLETED=====================");
-			return name;
+		private static String uploadSummaryFileToS3(File HTMLsummaryFile,String fileNameRecievedFromWorker) {
+			synchronized (upLock){
+				System.out.println("=====================UPLOAD SUMMARY FILE TO S3=====================");
+				String name = "output"+fileNameRecievedFromWorker + ".html";
+				PutObjectRequest req = new PutObjectRequest(bucketName, name, HTMLsummaryFile);
+				s3.putObject(req);
+				System.out.println("=====================UPLOAD SUMMARY FILE TO S3 COMPLETED=====================");
+				return name;
+			}
 		}
 
-		private static File createHTML() {
+		private static File createHTML(ArrayList<ArrayList<String>> ArrayDoneTasks,String fileNameRecievedFromWorker) {
 			synchronized (HTMLlock) {
 				System.out.println("=====================CREATE HTML=====================");
 				try {
@@ -251,31 +271,34 @@ public class Manager {
 		}
 
 		private static void sendMessageToFileDoneQ(String summaryFileName) {
-			System.out.println("=====================SENDING MESSAGE TO DONE Queue=====================");
-			myReceiveQueueUrl = createAndGetQueue(sqsManagerLocalFileDone);
-			String doneTask = "done task@@@" + bucketName + "@@@" + summaryFileName;
-			sqs.sendMessage(new SendMessageRequest(sqsManagerLocalFileDone, doneTask));
-			System.out.println("=====================THE DONE MESSAGE HAS BEEN SENT PROPERLY=====================");
+			synchronized(doneLock) {
+				System.out.println("=====================SENDING MESSAGE TO DONE Queue=====================");
+				myReceiveQueueUrl = createAndGetQueue(sqsManagerLocalFileDone);
+				String doneTask = "done task@@@" + bucketName + "@@@" + summaryFileName;
+				sqs.sendMessage(new SendMessageRequest(sqsManagerLocalFileDone, doneTask));
+				System.out.println("=====================THE DONE MESSAGE HAS BEEN SENT PROPERLY=====================");
+			}
 		}
 
-		//sends new tasks(urls) to message queue and returns number of urls to be done.
-		private static int sendUrlsToMessageQueue(S3Object object) throws IOException {
+		private static int sendUrlsToMessageQueue(S3Object object, String inputFileName) throws IOException {
 			int counter = 0;
 			BufferedReader reader = new BufferedReader(new InputStreamReader(object.getObjectContent()));
 			String line;
-			while((line = reader.readLine()) != null) {
-				// send new worker job to sqsManagerWorkerNewTask queue
-				sqs.sendMessage(new SendMessageRequest(sqsManagerWorkerNewTask, "new image task@@@" + bucketName + "@@@" + line + "@@@" + inputFileName));
-				counter++;
+			while((line = reader.readLine()) != null  ) {
+				if(!(line.trim().equals("") )) {
+					sqs.sendMessage(new SendMessageRequest(sqsManagerWorkerNewTask, "new image task@@@" + bucketName + "@@@" + line + "@@@" + inputFileName));
+					counter++;
+				}
 			}
 			return counter;
 		}
 
-		private static S3Object getFile() {
+		private static S3Object getFile(String inputFileName) {
 			System.out.println("=====================Getting file from S3=====================");
 			S3Object object;
+
 			try {
-				object = s3.getObject(new GetObjectRequest(bucketName, inputFileName));
+				object = s3.getObject(new GetObjectRequest(bucketName, inputFileName)); 
 				return object;
 			}
 			catch (Exception e) {
@@ -285,7 +308,7 @@ public class Manager {
 
 		}
 
-		private static void closeInstances() {
+		private static void closeInstances(List<Instance> workersList) {
 			System.out.println("==================Shutting down working instances====================");
 			List<String> toCloseList = new ArrayList<>();
 			if (workersList != null) {
@@ -301,20 +324,46 @@ public class Manager {
 
 	public static void main(String[] args) throws IOException, Exception {
 		BuildTools();
-		while(true) {
-			getNewMessageAndRunThread();
-			try {
-				System.out.println("wait....");
-				sleep(8000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
+		//Thread 1
+		System.out.println("before localAppMsgListner THREAD 1");
+		Thread LocalManagerMessageReceiveThread = new Thread(() -> { 
+			while(true) {
+				try {
+					localAppMsgListner();
+					sleep(15000);
+					System.out.println("waiting 15 sec to sync new input filed ---THREAD 1---");
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+
 			}
-			//System.out.println("wait loop - trying to get all The Workers OCR Text..");
-			//need to terminate manager here
-		}
-		//deleteQueue();
-		//deleteS3AndContent();
+		});
+		LocalManagerMessageReceiveThread.start();
+
+
+		//Thread 2
+		sleep(5000);
+		Thread ManagerWorkerMessageReceiveThread = new Thread(() -> {
+			while(true) {
+				try {
+					sleep(1000);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+				while(hasTasks()) {
+					ThreadLocal<clientThread> TL = new ThreadLocal<clientThread>();
+					TL.set(getNextClient());
+					System.out.println("A new Client has been lunched , Thread:"+TL.get());
+					TL.get().start();;
+
+
+				}
+			}
+		});
+		ManagerWorkerMessageReceiveThread.start();
 	}
+
+
 	private static void deleteS3AndContent() {
 		ObjectListing objectListing = s3.listObjects(bucketName);
 		while (true) {
@@ -332,8 +381,6 @@ public class Manager {
 		sqs.deleteQueue(new DeleteQueueRequest(myReceiveQueueUrl));
 		sqs.deleteQueue(new DeleteQueueRequest(mySendQueueUrl));
 	}
-
-
 	private static void BuildTools() {
 		ec2 = AmazonEC2ClientBuilder.standard()
 				.withCredentials(credentialsProvider)
@@ -355,36 +402,30 @@ public class Manager {
 		myDoneWorkerQueueUrl = createAndGetQueue(sqsWorkerManagerDoneTask);
 
 		instanceP = new IamInstanceProfileSpecification();
-		instanceP.setArn("arn:aws:iam::692054548727:instance-profile/NadavS3Role");
+		instanceP.setArn("arn:aws:iam::708287573688:instance-profile/myRole");
 
 	}
-	private static void getNewMessageAndRunThread() {
-		String[] parseMessage = null;
-		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
-		for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
-			System.out.println("message : " + message);
-			if(message == null)
-				continue;
-			else {
-				if (message.getBody().startsWith("new task@@@")) {
-					parseMessage = message.getBody().split("@@@");
-					clientThread client = new clientThread();
-					client.NumberOfactiveWorkers=0;
-					client.numOfUrlsPerWorker = Integer.parseInt(parseMessage[3]);
-					client.inputFileName = parseMessage[2].substring(parseMessage[2].lastIndexOf("\\")+1);
-					client.fileNameRecievedFromWorker = "";
-					client.processedUrlList = new ArrayList<String>();
-					client.workersList = new ArrayList<Instance>();
-					System.out.println("=====================input File Name: " + client.inputFileName + "=====================");
-					Thread managerThread = new Thread(client);
-					managerThread.start();
-					String messageRecieptHandle = message.getReceiptHandle();
-					sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
+	private static void localAppMsgListner() {
+		synchronized(lock) {
+			String[] parseMessage = null;
+			ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
+			for(Message message : sqs.receiveMessage(receiveMessageRequest).getMessages()) {
+				System.out.println("message : " + message);
+				if(message == null)
+					continue;
+				else {
+					if (message.getBody().startsWith("new task@@@")) {
+						parseMessage = message.getBody().split("@@@");
+						System.out.println("=====================input File Name: " + parseMessage[2] + " clientID: "+ parseMessage[4] +"=====================");
+						safeListOfTasks.add(parseMessage);
+						String messageRecieptHandle = message.getReceiptHandle();
+						sqs.deleteMessage(new DeleteMessageRequest(myReceiveQueueUrl, messageRecieptHandle));
+						System.out.println("New Task has been added --- THREAD 1 ---");
+					}
 				}
 			}
 		}
 	}
-	
 	private static String createAndGetQueue(String queueName) {
 		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
 			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))
@@ -406,4 +447,48 @@ public class Manager {
 		}
 
 		return null;
-	}}
+	}
+	private static boolean hasTasks() {
+
+		return !safeListOfTasks.isEmpty();
+	}
+	private static clientThread getNextClient() {
+		synchronized(clientLock) {
+			if(hasTasks()) {
+				String inputName = safeListOfTasks.get(0)[2].substring(safeListOfTasks.get(0)[2].lastIndexOf("\\")+1);
+				String clientID = safeListOfTasks.get(0)[4];
+
+				int numOfWorkerks = Integer.parseInt(safeListOfTasks.get(0)[3]);
+				safeListOfTasks.remove(0);
+				clientThread ct = new clientThread(inputName, clientID, numOfWorkerks);
+				return ct;
+			}
+			return null;
+		}
+	}
+	public static class container{
+
+		public int numOfDoneUrls;
+		public String input;
+
+		public container() {}
+
+		public int getNumOfDoneUrls() {
+			return numOfDoneUrls;
+		}
+
+		public void setNumOfDoneUrls(int numOfDoneUrls) {
+			this.numOfDoneUrls = numOfDoneUrls;
+		}
+
+		public void setInput(String input) {
+			this.input = input;
+		}
+
+		public String getInput() {
+			return input;
+		}
+
+	}
+
+	}
