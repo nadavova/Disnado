@@ -1,4 +1,4 @@
-package com.amazonaws.samples;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -49,7 +49,6 @@ import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.transfer.Download;
-import com.amazonaws.services.s3.transfer.TransferManager;
 import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
@@ -61,17 +60,20 @@ import com.amazonaws.services.sqs.model.SendMessageRequest;
 import static java.lang.Thread.sleep;
 
 public class LocalApplication {
+	private static String clientID = Long.toString(System.currentTimeMillis()); 
 	protected static AmazonEC2 ec2;
 	private static AmazonS3 s3;
 	private static AmazonSQS sqs;
 	public static IamInstanceProfileSpecification IAMinstance;
 	public static Message messageFromDoneQ;
 	private static AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(new ProfileCredentialsProvider().getCredentials());
-	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();//rename bucket
+	private static String bucketName = credentialsProvider.getCredentials().getAWSAccessKeyId().toLowerCase();
 	private static String mySendQueueUrl, myReceiveQueueUrl;
 	private static String sqsLocalManagerFileUpload = "sqsLocalManagerFileUpload";
 	private static String sqsManagerLocalFileDone = "sqsManagerLocalFileDone";
 
+	
+	
 	public static void main(String[] args) throws IOException, InterruptedException {
 		long startTime = System.currentTimeMillis();
 		boolean terminate = false;
@@ -81,19 +83,20 @@ public class LocalApplication {
 			terminate = true;
 		}
 		buildTools();
-		//createS3();
-		//uploadFiles(args);
-		//Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
+		createS3();
+		uploadFiles(args);
+		Instance managerInstance = createManagerInstance(Integer.parseInt(args[args.length - 1]));
 		System.out.println("=====================Sending a message to Local-Manager Queue=====================");
 		/* The application will send a message to a specified
 		 *  SQS queue, stating the location of the images list on S3
 		 */
-		sqs.sendMessage(new SendMessageRequest(sqsLocalManagerFileUpload, "new task@@@" + bucketName + "@@@" + args[0] + "@@@" + args[args.length - 1]));
+		sqs.sendMessage(new SendMessageRequest(sqsLocalManagerFileUpload, "new task@@@" + bucketName + "@@@" + args[0] + "@@@" + args[args.length - 1] + "@@@" + clientID));
 		try {
 			while(!getResponseFromQ()) 
 			{
 				System.out.println("=====================wait, trying to get The Manager's Summary file=====================");
-				sleep(10000);
+				sleep(30000);
+				
 			}
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
@@ -152,6 +155,7 @@ public class LocalApplication {
 		long totalTime = endTime - startTime;
 		System.out.println(totalTime);
 		System.out.println("=====================COMPLETED=====================");
+		
 	}
 
 	private static void buildTools() {
@@ -164,7 +168,7 @@ public class LocalApplication {
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
 				.build();
-		//queue
+		
 		sqs = AmazonSQSClientBuilder.standard()
 				.withCredentials(credentialsProvider)
 				.withRegion("us-east-1")
@@ -173,8 +177,8 @@ public class LocalApplication {
 		mySendQueueUrl = getQueue(sqsLocalManagerFileUpload);
 		myReceiveQueueUrl = getQueue(sqsManagerLocalFileDone);
 		IAMinstance = new IamInstanceProfileSpecification();
-		IAMinstance.setArn("arn:aws:iam::692054548727:instance-profile/EgorNadavRole");
-	}
+		IAMinstance.setArn("arn:aws:iam::692054548727:instance-profile/"set role name"");
+	}					   
 
 	private static boolean getResponseFromQ() throws InterruptedException {
 		ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(myReceiveQueueUrl);
@@ -276,6 +280,7 @@ public class LocalApplication {
 					+ "such as not being able to access the network.");
 		}
 	}
+	
 	private static String getQueue(String queueName) {
 		for (String queueUrl : sqs.listQueues().getQueueUrls()) {
 			if(queueName.equals(queueUrl.substring(queueUrl.lastIndexOf('/') + 1)))
@@ -295,10 +300,9 @@ public class LocalApplication {
 		return null;
 	}
 
-
 	//uploads 3 files, args[0] = input file , args[1] = Manager.jar file, args[2] = Worker.jar file
 	private static void uploadFiles( String[] args) {     
-		for( int i = 0; i < 3 ; i++) {
+		for( int i = 0; i < 3 ; i++) { 
 			System.out.println("Uploading jar files\n");
 			String key = null;
 			File file = null;
@@ -310,7 +314,7 @@ public class LocalApplication {
 			PutObjectRequest req = new PutObjectRequest(bucketName, key, file);
 			req.setCannedAcl(CannedAccessControlList.PublicRead);
 
-			//req.setCannedAcl(CannedAccessControlList.PublicRead);
+			
 			//The application will send a message to a specified SQS queue, stating the location of the images list on S3
 			s3.putObject(req);
 			System.out.println("after object request");
